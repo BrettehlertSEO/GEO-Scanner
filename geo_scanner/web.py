@@ -92,12 +92,14 @@ async def api_stats():
 
 @app.get("/api/config")
 async def api_config():
+    has_key = bool(settings.openai_api_key and len(settings.openai_api_key) > 10)
     return {
         "brand_name": settings.brand_name,
         "brand_aliases": settings.brand_aliases,
         "feeds_configured": len(settings.google_alerts_feed_urls),
         "scan_interval_hours": settings.scan_interval_hours,
         "openai_model": settings.openai_model,
+        "openai_key_configured": has_key,
     }
 
 
