@@ -8,6 +8,7 @@ from geo_scanner.discovery import (
     build_alert_feed_url,
     build_default_feed_urls,
     parse_feed_entries,
+    resolve_result_urls,
 )
 
 SAMPLE_RSS = """\
@@ -111,3 +112,11 @@ def test_is_google_alerts_wrapper():
         "https://www.google.com/url?q=https://example.com/article"
     )
     assert not _is_google_alerts_wrapper("https://example.com/article")
+
+
+def test_resolve_skips_non_google_urls():
+    results = [
+        SearchResult(url="https://example.com/article", title="T", snippet="S", query="q"),
+    ]
+    resolve_result_urls(results)
+    assert results[0].url == "https://example.com/article"

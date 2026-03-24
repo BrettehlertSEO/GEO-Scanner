@@ -9,6 +9,7 @@ from urllib.parse import quote_plus, urlparse
 
 import feedparser
 import httpx
+from googlenewsdecoder import gnewsdecoder
 
 from geo_scanner.config import Settings
 
@@ -69,52 +70,17 @@ def _is_google_alerts_wrapper(url: str) -> bool:
     return "google.com/url?" in url
 
 
-async def resolve_google_url(url: str, settings: Settings) -> str:
+def _decode_google_news_url(url: str) -> str:
     """
-    Resolve a Google News/Alerts wrapper URL to the actual publisher URL.
-
-    Google News wrapper URLs (news.google.com/rss/articles/...) redirect
-    to the real article via HTTP 3xx. We follow the redirect chain and
-    return the final destination URL.
+    Decode a Google News wrapper URL to the real publisher URL
+    using the googlenewsdecoder library.
     """
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
     try:
-        async with httpx.AsyncClient(
-            timeout=settings.request_timeout,
-            follow_redirects=True,
-            headers=headers,
-        ) as client:
-            resp = await client.get(url)
-            final_url = str(resp.url)
-
-            if "news.google.com" not in final_url:
-                return final_url
-
-            # Some Google News pages embed the real URL in the HTML as a
-            # data-redirect or <a> tag. Try to extract it.
-            text = resp.text
-            match = re.search(
-                r'<a[^>]+href="(https?://(?!news\.google\.com)[^"]+)"[^>]*>',
-                text,
-            )
-            if match:
-                return match.group(1)
-
-            match = re.search(r'data-n-au="(https?://[^"]+)"', text)
-            if match:
-                return match.group(1)
-
-    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
-        logger.debug("Failed to resolve Google URL %s: %s", url, exc)
-
+        result = gnewsdecoder(url, interval=1)
+        if result.get("status") and result.get("decoded_url"):
+            return result["decoded_url"]
+    except Exception as exc:
+        logger.debug("Failed to decode Google News URL %s: %s", url, exc)
     return url
 
 
@@ -164,18 +130,17 @@ def parse_feed_entries(
     return results
 
 
-async def resolve_result_urls(
-    results: list[SearchResult], settings: Settings
-) -> list[SearchResult]:
+def resolve_result_urls(results: list[SearchResult]) -> list[SearchResult]:
     """
     Resolve any Google News/Alerts wrapper URLs to real publisher URLs.
 
+    Uses googlenewsdecoder for Google News article URLs.
     Modifies results in place and returns the list for convenience.
     """
     for r in results:
-        if _is_google_news_wrapper(r.url) or _is_google_alerts_wrapper(r.url):
+        if _is_google_news_wrapper(r.url):
             original = r.url
-            resolved = await resolve_google_url(r.url, settings)
+            resolved = _decode_google_news_url(r.url)
             if resolved != original:
                 logger.debug("Resolved %s -> %s", original, resolved)
                 r.url = resolved
@@ -213,7 +178,7 @@ async def discover_mentions(
     2. Any extra_feed_urls passed as an argument
     3. Auto-generated Google News RSS feeds based on brand terms (fallback)
 
-    All Google News/Alerts wrapper URLs are resolved to real publisher URLs
+    All Google News wrapper URLs are decoded to real publisher URLs
     before returning.
     """
     feed_urls: list[tuple[str, str]] = []  # (url, label) pairs
@@ -247,10 +212,10 @@ async def discover_mentions(
         if len(all_results) >= settings.max_results_per_query:
             break
 
-    # Resolve Google News/Alerts wrapper URLs to real publisher URLs
-    await resolve_result_urls(all_results, settings)
+    logger.info("Resolving %d Google News wrapper URLs...", len(all_results))
+    resolve_result_urls(all_results)
 
-    # Re-deduplicate after resolution (different wrapper URLs may resolve to same article)
+    # Re-deduplicate after resolution (different wrapper URLs may point to same article)
     final: list[SearchResult] = []
     seen: set[str] = set()
     for r in all_results:
