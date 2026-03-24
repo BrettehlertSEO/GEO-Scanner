@@ -24,6 +24,8 @@ class Settings(BaseModel):
     max_results_per_query: int = Field(default=20)
     database_path: str = Field(default="geo_scanner.db")
 
+    scan_interval_hours: float = Field(default=12.0)
+
     request_timeout: int = Field(default=30)
     user_agent: str = Field(default="GEO-Scanner/0.1")
 
@@ -52,6 +54,7 @@ def get_settings() -> Settings:
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         max_results_per_query=int(os.getenv("MAX_RESULTS_PER_QUERY", "20")),
         database_path=os.getenv("DATABASE_PATH", "geo_scanner.db"),
+        scan_interval_hours=float(os.getenv("SCAN_INTERVAL_HOURS", "12")),
         request_timeout=int(os.getenv("REQUEST_TIMEOUT", "30")),
         user_agent=os.getenv("USER_AGENT", "GEO-Scanner/0.1"),
     )

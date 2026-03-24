@@ -38,7 +38,7 @@ Large Language Models are trained on web content. When a publication writes abou
 | `storage.py` | Persists mention records in SQLite with full query/filter support |
 | `pipeline.py` | Orchestrates the full scan flow with async concurrency |
 | `reports.py` | Rich terminal tables, detailed views, CSV/JSON export |
-| `cli.py` | Click-based CLI with `scan`, `check`, `list`, `detail`, `stats`, `export`, `feeds` commands |
+| `cli.py` | Click-based CLI with `scan`, `watch`, `check`, `list`, `detail`, `stats`, `export`, `feeds` commands |
 
 ---
 
@@ -73,6 +73,7 @@ Optional (but recommended):
 | `BRAND_ALIASES` | `RocketMoney,Rocket Money app` | Comma-separated alternate names |
 | `OPENAI_MODEL` | `gpt-4o-mini` | Model used for analysis |
 | `MAX_RESULTS_PER_QUERY` | `20` | Cap on total results per scan |
+| `SCAN_INTERVAL_HOURS` | `12` | Hours between scans in `watch` mode (12 = twice daily) |
 | `DATABASE_PATH` | `geo_scanner.db` | SQLite database file path |
 | `REQUEST_TIMEOUT` | `30` | HTTP request timeout in seconds |
 
@@ -166,6 +167,16 @@ geo-scanner export -f json -o mentions.json
 geo-scanner export -f csv -s positive     # Export only positive mentions
 ```
 
+### `watch` — Automated recurring scans
+
+```bash
+geo-scanner watch                         # Every 12 hours (default)
+geo-scanner watch -i 8                    # Every 8 hours
+geo-scanner watch -i 0.5                  # Every 30 minutes (for testing)
+```
+
+Runs continuously, scanning at the configured interval. Press Ctrl+C to stop gracefully. Already-seen URLs are skipped, so only new mentions incur OpenAI costs.
+
 ### `feeds` — View feed configuration
 
 ```bash
@@ -176,6 +187,38 @@ geo-scanner feeds
 
 ```bash
 geo-scanner -v scan      # Verbose/debug logging
+```
+
+---
+
+## Scheduling
+
+GEO-Scanner defaults to **twice daily** (every 12 hours) to keep costs low. Already-processed URLs are skipped, so repeat scans only spend OpenAI credits on genuinely new mentions.
+
+### Option A: Built-in watch mode
+
+Leave it running in the background (or in a screen/tmux session):
+
+```bash
+geo-scanner watch
+```
+
+The interval defaults to `SCAN_INTERVAL_HOURS` in your `.env` (12 hours). Override per-run with `-i`:
+
+```bash
+geo-scanner watch -i 8    # every 8 hours instead
+```
+
+### Option B: Cron
+
+If you prefer system-level scheduling, add a cron entry. For twice daily at 8 AM and 8 PM:
+
+```bash
+crontab -e
+```
+
+```
+0 8,20 * * * cd /path/to/geo-scanner && /path/to/geo-scanner scan >> /var/log/geo-scanner.log 2>&1
 ```
 
 ---

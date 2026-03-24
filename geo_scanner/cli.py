@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
+import signal
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -204,6 +207,82 @@ def export(
         click.echo(content)
 
     store.close()
+
+
+@cli.command()
+@click.option(
+    "--interval", "-i", type=float, default=None,
+    help="Hours between scans (default: SCAN_INTERVAL_HOURS from .env, or 12).",
+)
+@click.option(
+    "--concurrency", "-c", default=3, help="Max concurrent crawl/analysis tasks."
+)
+@click.pass_context
+def watch(ctx: click.Context, interval: float | None, concurrency: int) -> None:
+    """Run scans on a recurring schedule (default: every 12 hours / twice daily)."""
+    from geo_scanner.pipeline import run_scan
+
+    settings = ctx.obj["settings"]
+    hours = interval if interval is not None else settings.scan_interval_hours
+    interval_seconds = hours * 3600
+
+    console.print(
+        f"[bold magenta]GEO-Scanner watch mode[/bold magenta] for "
+        f"[cyan]{settings.brand_name}[/cyan]\n"
+        f"Scanning every [bold]{hours}[/bold] hour(s). Press Ctrl+C to stop."
+    )
+
+    stop = False
+
+    def _handle_signal(signum: int, frame: object) -> None:
+        nonlocal stop
+        stop = True
+        console.print("\n[yellow]Shutting down gracefully...[/yellow]")
+
+    signal.signal(signal.SIGINT, _handle_signal)
+    signal.signal(signal.SIGTERM, _handle_signal)
+
+    scan_count = 0
+    while not stop:
+        scan_count += 1
+        now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        console.print(f"\n[bold]--- Scan #{scan_count} at {now} ---[/bold]")
+
+        store = MentionStore(settings.database_path)
+        try:
+            mentions = asyncio.run(
+                run_scan(settings, store, concurrency=concurrency)
+            )
+            if mentions:
+                print_mention_table(mentions)
+                corrections = [m for m in mentions if m.correction_needed]
+                if corrections:
+                    console.print(
+                        f"[bold red]⚠ {len(corrections)} mention(s) may need correction![/bold red]"
+                    )
+            else:
+                console.print("[dim]No new mentions found.[/dim]")
+        except Exception as exc:
+            logger.error("Scan failed: %s", exc)
+            console.print(f"[red]Scan failed: {exc}[/red]")
+        finally:
+            store.close()
+
+        if stop:
+            break
+
+        next_time = dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=interval_seconds)
+        console.print(
+            f"[dim]Next scan at {next_time.strftime('%Y-%m-%d %H:%M UTC')} "
+            f"({hours}h from now)[/dim]"
+        )
+
+        elapsed = 0.0
+        while elapsed < interval_seconds and not stop:
+            time.sleep(min(1.0, interval_seconds - elapsed))
+            elapsed += 1.0
+
+    console.print(f"[green]Watch mode stopped after {scan_count} scan(s).[/green]")
 
 
 @cli.command()
