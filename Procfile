@@ -1,1 +1,1 @@
-web: uvicorn geo_scanner.web:app --host 0.0.0.0 --port ${PORT:-8000}
+web: python -c "import os,uvicorn;uvicorn.run('geo_scanner.web:app',host='0.0.0.0',port=int(os.environ.get('PORT','8000')))"
