@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 from urllib.parse import quote_plus, urlparse
 
@@ -32,15 +33,9 @@ class SearchResult:
 
 def build_alert_feed_url(query: str) -> str:
     """
-    Build a Google Alerts RSS feed URL for a given query.
+    Build a Google News RSS feed URL for a given query.
 
-    Google Alerts RSS feeds follow the pattern:
-        https://www.google.com/alerts/feeds/<id>/...
-    But users can also create alerts at https://www.google.com/alerts
-    and grab the RSS feed URL from there.
-
-    This helper generates a Google News RSS feed URL as a fallback
-    when the user hasn't provided a pre-configured feed URL.
+    Used as a fallback when no Google Alerts RSS feed URLs are configured.
     """
     encoded = quote_plus(query)
     return f"https://news.google.com/rss/search?q={encoded}&hl=en-US&gl=US&ceid=US:en"
@@ -58,6 +53,69 @@ def build_default_feed_urls(settings: Settings) -> list[str]:
     for term in settings.all_brand_terms:
         urls.append(build_alert_feed_url(f'"{term}"'))
     return urls
+
+
+def _is_google_news_wrapper(url: str) -> bool:
+    """Check if a URL is a Google News article redirect wrapper."""
+    parsed = urlparse(url)
+    return (
+        parsed.netloc in ("news.google.com", "www.google.com")
+        and "/rss/articles/" in parsed.path
+    )
+
+
+def _is_google_alerts_wrapper(url: str) -> bool:
+    """Check if a URL is a Google Alerts redirect wrapper."""
+    return "google.com/url?" in url
+
+
+async def resolve_google_url(url: str, settings: Settings) -> str:
+    """
+    Resolve a Google News/Alerts wrapper URL to the actual publisher URL.
+
+    Google News wrapper URLs (news.google.com/rss/articles/...) redirect
+    to the real article via HTTP 3xx. We follow the redirect chain and
+    return the final destination URL.
+    """
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    try:
+        async with httpx.AsyncClient(
+            timeout=settings.request_timeout,
+            follow_redirects=True,
+            headers=headers,
+        ) as client:
+            resp = await client.get(url)
+            final_url = str(resp.url)
+
+            if "news.google.com" not in final_url:
+                return final_url
+
+            # Some Google News pages embed the real URL in the HTML as a
+            # data-redirect or <a> tag. Try to extract it.
+            text = resp.text
+            match = re.search(
+                r'<a[^>]+href="(https?://(?!news\.google\.com)[^"]+)"[^>]*>',
+                text,
+            )
+            if match:
+                return match.group(1)
+
+            match = re.search(r'data-n-au="(https?://[^"]+)"', text)
+            if match:
+                return match.group(1)
+
+    except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+        logger.debug("Failed to resolve Google URL %s: %s", url, exc)
+
+    return url
 
 
 async def fetch_feed(url: str, settings: Settings) -> Optional[str]:
@@ -91,8 +149,6 @@ def parse_feed_entries(
         title = entry.get("title", "")
         snippet = entry.get("summary", "") or entry.get("description", "")
 
-        # Strip HTML tags from title/snippet (feedparser sometimes leaves them)
-        import re
         title = re.sub(r"<[^>]+>", "", title).strip()
         snippet = re.sub(r"<[^>]+>", "", snippet).strip()
 
@@ -105,6 +161,25 @@ def parse_feed_entries(
             )
         )
 
+    return results
+
+
+async def resolve_result_urls(
+    results: list[SearchResult], settings: Settings
+) -> list[SearchResult]:
+    """
+    Resolve any Google News/Alerts wrapper URLs to real publisher URLs.
+
+    Modifies results in place and returns the list for convenience.
+    """
+    for r in results:
+        if _is_google_news_wrapper(r.url) or _is_google_alerts_wrapper(r.url):
+            original = r.url
+            resolved = await resolve_google_url(r.url, settings)
+            if resolved != original:
+                logger.debug("Resolved %s -> %s", original, resolved)
+                r.url = resolved
+                r.domain = urlparse(resolved).netloc
     return results
 
 
@@ -137,6 +212,9 @@ async def discover_mentions(
     1. Explicit feed URLs from settings.google_alerts_feed_urls
     2. Any extra_feed_urls passed as an argument
     3. Auto-generated Google News RSS feeds based on brand terms (fallback)
+
+    All Google News/Alerts wrapper URLs are resolved to real publisher URLs
+    before returning.
     """
     feed_urls: list[tuple[str, str]] = []  # (url, label) pairs
 
@@ -169,6 +247,17 @@ async def discover_mentions(
         if len(all_results) >= settings.max_results_per_query:
             break
 
+    # Resolve Google News/Alerts wrapper URLs to real publisher URLs
+    await resolve_result_urls(all_results, settings)
+
+    # Re-deduplicate after resolution (different wrapper URLs may resolve to same article)
+    final: list[SearchResult] = []
+    seen: set[str] = set()
+    for r in all_results:
+        if r.url not in seen:
+            seen.add(r.url)
+            final.append(r)
+
     logger.info("Discovered %d unique mention candidates from %d feed(s).",
-                len(all_results), len(feed_urls))
-    return all_results
+                len(final), len(feed_urls))
+    return final

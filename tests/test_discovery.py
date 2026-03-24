@@ -3,6 +3,8 @@
 from geo_scanner.config import Settings
 from geo_scanner.discovery import (
     SearchResult,
+    _is_google_news_wrapper,
+    _is_google_alerts_wrapper,
     build_alert_feed_url,
     build_default_feed_urls,
     parse_feed_entries,
@@ -59,7 +61,7 @@ def test_build_default_feed_urls():
 
 def test_parse_rss_feed():
     results = parse_feed_entries(SAMPLE_RSS, "test-alert")
-    assert len(results) == 2  # third item has no link, should be skipped
+    assert len(results) == 2
     assert results[0].url == "https://example.com/rocket-money-review"
     assert results[0].title == "Rocket Money Review 2026: Is It Worth It?"
     assert results[0].query == "test-alert"
@@ -94,3 +96,18 @@ def test_search_result_domain_parsing():
         query="q",
     )
     assert r.domain == "www.nerdwallet.com"
+
+
+def test_is_google_news_wrapper():
+    assert _is_google_news_wrapper(
+        "https://news.google.com/rss/articles/CBMiXEFVX3lxTFBY..."
+    )
+    assert not _is_google_news_wrapper("https://example.com/article")
+    assert not _is_google_news_wrapper("https://news.google.com/rss/search?q=test")
+
+
+def test_is_google_alerts_wrapper():
+    assert _is_google_alerts_wrapper(
+        "https://www.google.com/url?q=https://example.com/article"
+    )
+    assert not _is_google_alerts_wrapper("https://example.com/article")
