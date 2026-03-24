@@ -190,13 +190,10 @@ async def discover_mentions(
         for url in extra_feed_urls:
             feed_urls.append((url, "extra-feed"))
 
-    if not feed_urls:
-        logger.info(
-            "No Google Alerts feed URLs configured — using auto-generated "
-            "Google News RSS feeds for brand terms."
-        )
-        for url in build_default_feed_urls(settings):
-            feed_urls.append((url, "auto-google-news"))
+    # Always include Google News RSS feeds for brand terms so we have
+    # coverage even when Google Alerts feeds are empty or newly created.
+    for url in build_default_feed_urls(settings):
+        feed_urls.append((url, "auto-google-news"))
 
     seen_urls: set[str] = set()
     all_results: list[SearchResult] = []
