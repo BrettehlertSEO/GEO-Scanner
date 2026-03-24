@@ -9,8 +9,10 @@ from pathlib import Path
 
 import click
 from rich.console import Console
+from rich.table import Table
 
 from geo_scanner.config import get_settings
+from geo_scanner.discovery import build_alert_feed_url
 from geo_scanner.reports import (
     console,
     export_csv,
@@ -46,12 +48,8 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 
 @cli.command()
 @click.option(
-    "--date-restrict",
-    default="m1",
-    help="Date restriction for search (e.g. d7=7 days, m1=1 month).",
-)
-@click.option(
-    "--query", "-q", multiple=True, help="Additional search queries to run."
+    "--feed", "-f", multiple=True,
+    help="Additional RSS feed URL(s) to poll (Google Alerts or Google News RSS).",
 )
 @click.option(
     "--concurrency", "-c", default=3, help="Max concurrent crawl/analysis tasks."
@@ -59,11 +57,10 @@ def cli(ctx: click.Context, verbose: bool) -> None:
 @click.pass_context
 def scan(
     ctx: click.Context,
-    date_restrict: str,
-    query: tuple[str, ...],
+    feed: tuple[str, ...],
     concurrency: int,
 ) -> None:
-    """Run a full brand mention scan: discover, crawl, analyze, and store."""
+    """Run a full brand mention scan: poll feeds, crawl, analyze, and store."""
     from geo_scanner.pipeline import run_scan
 
     settings = ctx.obj["settings"]
@@ -74,13 +71,23 @@ def scan(
         f"[cyan]{settings.brand_name}[/cyan]"
     )
 
-    extra = list(query) if query else None
+    if settings.google_alerts_feed_urls:
+        console.print(
+            f"[dim]Using {len(settings.google_alerts_feed_urls)} configured "
+            f"Google Alerts feed(s)[/dim]"
+        )
+    else:
+        console.print(
+            "[dim]No Google Alerts feeds configured — using auto-generated "
+            "Google News RSS feeds[/dim]"
+        )
+
+    extra = list(feed) if feed else None
     mentions = asyncio.run(
         run_scan(
             settings,
             store,
-            date_restrict=date_restrict,
-            extra_queries=extra,
+            extra_feed_urls=extra,
             concurrency=concurrency,
         )
     )
@@ -197,6 +204,42 @@ def export(
         click.echo(content)
 
     store.close()
+
+
+@cli.command()
+@click.pass_context
+def feeds(ctx: click.Context) -> None:
+    """Show configured feed URLs and auto-generated fallback feeds."""
+    settings = ctx.obj["settings"]
+
+    table = Table(title="Feed Configuration", show_lines=True)
+    table.add_column("Source", style="cyan")
+    table.add_column("URL", max_width=80)
+
+    if settings.google_alerts_feed_urls:
+        for url in settings.google_alerts_feed_urls:
+            table.add_row("Google Alert", url)
+    else:
+        console.print(
+            "[yellow]No Google Alerts feed URLs configured in "
+            "GOOGLE_ALERTS_FEED_URLS.[/yellow]\n"
+        )
+
+    console.print(table)
+
+    console.print("\n[bold]Auto-generated fallback feeds (Google News RSS):[/bold]")
+    fallback_table = Table(show_lines=True)
+    fallback_table.add_column("Brand Term", style="cyan")
+    fallback_table.add_column("Feed URL", max_width=80)
+    for term in settings.all_brand_terms:
+        fallback_table.add_row(term, build_alert_feed_url(f'"{term}"'))
+    console.print(fallback_table)
+
+    console.print(
+        "\n[dim]To use Google Alerts instead, visit https://www.google.com/alerts, "
+        "create alerts for your brand terms, enable 'RSS feed' delivery, then paste "
+        "the feed URLs into GOOGLE_ALERTS_FEED_URLS in your .env file.[/dim]"
+    )
 
 
 def main() -> None:

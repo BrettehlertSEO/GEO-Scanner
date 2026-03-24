@@ -80,20 +80,19 @@ async def run_scan(
     settings: Settings,
     store: MentionStore,
     *,
-    date_restrict: Optional[str] = "m1",
-    extra_queries: list[str] | None = None,
+    extra_feed_urls: list[str] | None = None,
     concurrency: int = 3,
 ) -> list[Mention]:
     """
     Run a full brand mention scan.
 
-    1. Discover mention candidates via search.
+    1. Poll Google Alerts RSS feeds for new mention candidates.
     2. Crawl each URL and extract content.
     3. Analyze brand-relevant passages with an LLM.
     4. Store results in the database.
     """
     results = await discover_mentions(
-        settings, date_restrict=date_restrict, extra_queries=extra_queries
+        settings, extra_feed_urls=extra_feed_urls
     )
 
     if not results:

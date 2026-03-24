@@ -15,8 +15,8 @@ class Settings(BaseModel):
     brand_name: str = Field(default="Rocket Money")
     brand_aliases: list[str] = Field(default_factory=lambda: ["RocketMoney", "Rocket Money app"])
 
-    google_api_key: str = Field(default="")
-    google_cse_id: str = Field(default="")
+    # Google Alerts RSS feed URLs (the primary discovery mechanism)
+    google_alerts_feed_urls: list[str] = Field(default_factory=list)
 
     openai_api_key: str = Field(default="")
     openai_model: str = Field(default="gpt-4o-mini")
@@ -41,11 +41,13 @@ def get_settings() -> Settings:
     aliases_raw = os.getenv("BRAND_ALIASES", "RocketMoney,Rocket Money app")
     aliases = [a.strip() for a in aliases_raw.split(",") if a.strip()]
 
+    feeds_raw = os.getenv("GOOGLE_ALERTS_FEED_URLS", "")
+    feeds = [f.strip() for f in feeds_raw.split(",") if f.strip()]
+
     return Settings(
         brand_name=os.getenv("BRAND_NAME", "Rocket Money"),
         brand_aliases=aliases,
-        google_api_key=os.getenv("GOOGLE_API_KEY", ""),
-        google_cse_id=os.getenv("GOOGLE_CSE_ID", ""),
+        google_alerts_feed_urls=feeds,
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
         max_results_per_query=int(os.getenv("MAX_RESULTS_PER_QUERY", "20")),

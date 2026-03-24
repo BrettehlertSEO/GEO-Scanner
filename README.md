@@ -21,23 +21,24 @@ Large Language Models are trained on web content. When a publication writes abou
 ## Architecture
 
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Discovery   │────▶│   Crawler    │────▶│   Analyzer   │────▶│   Storage    │
-│ (Google CSE) │     │ (trafilatura)│     │  (OpenAI)    │     │  (SQLite)    │
-└──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
-       │                                                              │
-       └──────────────── CLI / Reports (Rich) ◀──────────────────────┘
+┌──────────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│    Discovery     │────▶│   Crawler    │────▶│   Analyzer   │────▶│   Storage    │
+│ (Google Alerts   │     │ (trafilatura)│     │  (OpenAI)    │     │  (SQLite)    │
+│  RSS Feeds)      │     │              │     │              │     │              │
+└──────────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+         │                                                                │
+         └──────────────────── CLI / Reports (Rich) ◀─────────────────────┘
 ```
 
 | Module | Responsibility |
 |---|---|
-| `discovery.py` | Builds search queries, calls Google Custom Search API, deduplicates results |
+| `discovery.py` | Polls Google Alerts RSS feeds (or auto-generated Google News RSS), deduplicates results |
 | `crawler.py` | Fetches pages, extracts article text via trafilatura, isolates brand-relevant passages |
 | `analyzer.py` | Sends passages to an LLM for structured sentiment/feature/summary analysis |
 | `storage.py` | Persists mention records in SQLite with full query/filter support |
 | `pipeline.py` | Orchestrates the full scan flow with async concurrency |
 | `reports.py` | Rich terminal tables, detailed views, CSV/JSON export |
-| `cli.py` | Click-based CLI with `scan`, `check`, `list`, `detail`, `stats`, `export` commands |
+| `cli.py` | Click-based CLI with `scan`, `check`, `list`, `detail`, `stats`, `export`, `feeds` commands |
 
 ---
 
@@ -51,7 +52,7 @@ pip install -e ".[dev]"
 
 ### 2. Configure
 
-Copy the example environment file and fill in your API keys:
+Copy the example environment file and fill in your values:
 
 ```bash
 cp .env.example .env
@@ -62,19 +63,20 @@ Required keys:
 | Variable | Description |
 |---|---|
 | `OPENAI_API_KEY` | OpenAI API key for LLM analysis |
-| `GOOGLE_API_KEY` | Google Custom Search JSON API key |
-| `GOOGLE_CSE_ID` | Google Custom Search Engine ID |
 
-Optional overrides:
+Optional (but recommended):
 
 | Variable | Default | Description |
 |---|---|---|
+| `GOOGLE_ALERTS_FEED_URLS` | *(empty)* | Comma-separated Google Alerts RSS feed URLs (see setup below) |
 | `BRAND_NAME` | `Rocket Money` | Primary brand name to monitor |
 | `BRAND_ALIASES` | `RocketMoney,Rocket Money app` | Comma-separated alternate names |
 | `OPENAI_MODEL` | `gpt-4o-mini` | Model used for analysis |
-| `MAX_RESULTS_PER_QUERY` | `20` | Cap on total search results per scan |
+| `MAX_RESULTS_PER_QUERY` | `20` | Cap on total results per scan |
 | `DATABASE_PATH` | `geo_scanner.db` | SQLite database file path |
 | `REQUEST_TIMEOUT` | `30` | HTTP request timeout in seconds |
+
+**No Google API key required.** If you don't configure `GOOGLE_ALERTS_FEED_URLS`, GEO-Scanner automatically generates Google News RSS feeds based on your brand terms as a zero-config fallback.
 
 ### 3. Run a Scan
 
@@ -83,7 +85,7 @@ geo-scanner scan
 ```
 
 This will:
-1. Search for recent brand mentions across the web
+1. Poll Google Alerts RSS feeds (or auto-generated Google News feeds) for new brand mentions
 2. Crawl each discovered page and extract article content
 3. Identify passages that reference the brand
 4. Analyze each mention with an LLM for sentiment, features, and recommendations
@@ -92,14 +94,39 @@ This will:
 
 ---
 
+## Setting Up Google Alerts (Recommended)
+
+Google Alerts gives you the best coverage for brand monitoring — it continuously monitors the web and notifies you via RSS when new content appears.
+
+1. Go to [Google Alerts](https://www.google.com/alerts)
+2. Create alerts for your brand terms:
+   - `"Rocket Money"`
+   - `"Rocket Money" review`
+   - `"Rocket Money" vs`
+   - `"RocketMoney"`
+3. For each alert, click **Show options** and set **Deliver to** → **RSS feed**
+4. Copy the RSS feed URL for each alert
+5. Paste all feed URLs (comma-separated) into `GOOGLE_ALERTS_FEED_URLS` in your `.env` file:
+
+```
+GOOGLE_ALERTS_FEED_URLS=https://www.google.com/alerts/feeds/abc123/...,https://www.google.com/alerts/feeds/def456/...
+```
+
+To see your current feed configuration:
+
+```bash
+geo-scanner feeds
+```
+
+---
+
 ## CLI Commands
 
 ### `scan` — Run a full brand mention scan
 
 ```bash
-geo-scanner scan                          # Default: past month
-geo-scanner scan --date-restrict d7       # Past 7 days only
-geo-scanner scan -q '"Rocket Money" fintech'  # Add custom queries
+geo-scanner scan                          # Poll configured feeds
+geo-scanner scan -f https://...rss_url    # Add an extra feed for this scan
 geo-scanner scan -c 5                     # 5 concurrent crawl tasks
 ```
 
@@ -139,6 +166,12 @@ geo-scanner export -f json -o mentions.json
 geo-scanner export -f csv -s positive     # Export only positive mentions
 ```
 
+### `feeds` — View feed configuration
+
+```bash
+geo-scanner feeds
+```
+
 ### Global Options
 
 ```bash
@@ -164,16 +197,6 @@ For each mention, the analyzer returns structured data:
 
 ---
 
-## Setting Up Google Custom Search
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) and enable the **Custom Search API**
-2. Create an API key under **APIs & Services > Credentials**
-3. Go to [Programmable Search Engine](https://programmablesearchengine.google.com/) and create a search engine
-4. Set it to search the entire web
-5. Copy the **Search Engine ID** and **API Key** into your `.env` file
-
----
-
 ## Development
 
 ```bash
@@ -196,7 +219,7 @@ geo_scanner/
 ├── __init__.py        # Package version
 ├── config.py          # Settings from environment/.env
 ├── models.py          # Pydantic domain models (Mention, AnalysisResult)
-├── discovery.py       # Web search / mention discovery
+├── discovery.py       # Google Alerts RSS feed polling & parsing
 ├── crawler.py         # Page fetching & content extraction
 ├── analyzer.py        # LLM-powered sentiment & feature analysis
 ├── storage.py         # SQLite persistence layer
