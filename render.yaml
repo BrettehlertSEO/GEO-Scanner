@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: geo-scanner
+    runtime: python
+    buildCommand: pip install -e .
+    startCommand: uvicorn geo_scanner.web:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GOOGLE_ALERTS_FEED_URLS
+        sync: false
+      - key: BRAND_NAME
+        value: Rocket Money
+      - key: DATABASE_PATH
+        value: /data/geo_scanner.db
+    disk:
+      name: geo-scanner-data
+      mountPath: /data
+      sizeGB: 1

@@ -240,6 +240,78 @@ For each mention, the analyzer returns structured data:
 
 ---
 
+## Web Dashboard
+
+GEO-Scanner includes a web dashboard so you can view results from any device.
+
+### Run locally
+
+```bash
+uvicorn geo_scanner.web:app --host 0.0.0.0 --port 8000
+```
+
+Then open [http://localhost:8000](http://localhost:8000).
+
+The dashboard shows:
+- **Stats overview** — total mentions, sentiment breakdown, corrections needed
+- **Top publications** — clickable domain filters
+- **Mentions table** — filterable by sentiment, domain, and correction status
+- **Detail modal** — click any mention for full analysis (summary, key excerpt, features, outreach recommendation)
+- **Run Scan button** — trigger a new scan directly from the browser
+
+### API Endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/stats` | GET | Aggregate stats (totals, sentiment breakdown, top domains) |
+| `/api/mentions` | GET | List mentions with optional `sentiment`, `domain`, `corrections`, `limit` params |
+| `/api/mentions/detail?url=...` | GET | Full detail for a single mention |
+| `/api/config` | GET | Current configuration summary |
+| `/api/scan` | POST | Trigger a background scan |
+
+---
+
+## Deploy to the Cloud
+
+### Render (Recommended)
+
+The repo includes a `render.yaml` blueprint for one-click deploy:
+
+1. Push to GitHub
+2. Go to [Render](https://render.com) → **New** → **Blueprint**
+3. Connect your repo and select the `render.yaml`
+4. Add your environment variables: `OPENAI_API_KEY`, `GOOGLE_ALERTS_FEED_URLS`
+5. Deploy — Render provisions the web service with persistent disk for SQLite
+
+### Railway
+
+1. Go to [Railway](https://railway.app) → **New Project** → **Deploy from GitHub**
+2. Select the repo
+3. Add environment variables: `OPENAI_API_KEY`, `GOOGLE_ALERTS_FEED_URLS`, `BRAND_NAME`
+4. Railway auto-detects the `Procfile` and deploys
+
+### Docker
+
+```bash
+docker build -t geo-scanner .
+docker run -p 8000:8000 \
+  -e OPENAI_API_KEY=sk-... \
+  -e GOOGLE_ALERTS_FEED_URLS=https://... \
+  -v geo_scanner_data:/app/data \
+  geo-scanner
+```
+
+### Fly.io
+
+```bash
+fly launch
+fly secrets set OPENAI_API_KEY=sk-...
+fly secrets set GOOGLE_ALERTS_FEED_URLS=https://...
+fly deploy
+```
+
+---
+
 ## Development
 
 ```bash
@@ -268,11 +340,17 @@ geo_scanner/
 ├── storage.py         # SQLite persistence layer
 ├── pipeline.py        # Async orchestration of the full scan flow
 ├── reports.py         # Rich terminal output & CSV/JSON export
-└── cli.py             # Click CLI entry point
+├── cli.py             # Click CLI entry point
+├── web.py             # FastAPI web app & API
+└── static/
+    └── index.html     # Dashboard frontend
 tests/
 ├── test_config.py
 ├── test_crawler.py
 ├── test_discovery.py
 ├── test_models.py
 └── test_storage.py
+Dockerfile             # Container deployment
+Procfile               # Heroku/Railway/Render process file
+render.yaml            # Render blueprint for one-click deploy
 ```

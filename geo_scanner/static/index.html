@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GEO-Scanner — Brand Mention Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 50: '#eff6ff', 100: '#dbeafe', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 900: '#1e3a5f' }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    .sentiment-positive { color: #16a34a; }
+    .sentiment-negative { color: #dc2626; }
+    .sentiment-neutral { color: #ca8a04; }
+    .sentiment-mixed { color: #0891b2; }
+    .badge { display: inline-block; padding: 2px 10px; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
+    .badge-positive { background: #dcfce7; color: #166534; }
+    .badge-negative { background: #fee2e2; color: #991b1b; }
+    .badge-neutral { background: #fef9c3; color: #854d0e; }
+    .badge-mixed { background: #cffafe; color: #155e75; }
+    .score-bar { height: 6px; border-radius: 3px; transition: width 0.3s; }
+    .modal-backdrop { background: rgba(0,0,0,0.5); }
+    .fade-in { animation: fadeIn 0.2s ease-in; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 bg-brand-600 rounded-lg flex items-center justify-center">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold text-gray-900">GEO-Scanner</h1>
+          <p class="text-xs text-gray-500" id="brandLabel">Brand Mention Dashboard</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-gray-400" id="lastUpdated"></span>
+        <button onclick="triggerScan()" id="scanBtn"
+          class="inline-flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700 transition disabled:opacity-50 disabled:cursor-not-allowed">
+          <svg class="w-4 h-4" id="scanIcon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Run Scan
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6" id="statsCards">
+      <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <p class="text-sm text-gray-500">Total Mentions</p>
+        <p class="text-2xl font-bold" id="statTotal">—</p>
+      </div>
+      <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <p class="text-sm text-gray-500">Positive</p>
+        <p class="text-2xl font-bold sentiment-positive" id="statPositive">—</p>
+      </div>
+      <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <p class="text-sm text-gray-500">Negative</p>
+        <p class="text-2xl font-bold sentiment-negative" id="statNegative">—</p>
+      </div>
+      <div class="bg-white rounded-xl border border-gray-200 p-4">
+        <p class="text-sm text-gray-500">Corrections Needed</p>
+        <p class="text-2xl font-bold text-red-600" id="statCorrections">—</p>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white rounded-xl border border-gray-200 p-4 mb-6 flex flex-wrap items-center gap-3">
+      <label class="text-sm font-medium text-gray-700">Filter:</label>
+      <select id="filterSentiment" onchange="loadMentions()" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
+        <option value="">All Sentiments</option>
+        <option value="positive">Positive</option>
+        <option value="negative">Negative</option>
+        <option value="neutral">Neutral</option>
+        <option value="mixed">Mixed</option>
+      </select>
+      <input id="filterDomain" onkeyup="debounceLoad()" placeholder="Filter by domain..." class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 w-48">
+      <label class="flex items-center gap-1.5 text-sm text-gray-700">
+        <input type="checkbox" id="filterCorrections" onchange="loadMentions()" class="rounded">
+        Corrections only
+      </label>
+      <div class="ml-auto text-sm text-gray-400" id="resultCount"></div>
+    </div>
+
+    <!-- Top Domains -->
+    <div class="bg-white rounded-xl border border-gray-200 p-4 mb-6">
+      <h2 class="text-sm font-semibold text-gray-700 mb-3">Top Publications</h2>
+      <div id="topDomains" class="flex flex-wrap gap-2"></div>
+    </div>
+
+    <!-- Mentions Table -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 border-b border-gray-200">
+            <tr>
+              <th class="text-left px-4 py-3 font-semibold text-gray-600">Publication</th>
+              <th class="text-left px-4 py-3 font-semibold text-gray-600">Title</th>
+              <th class="text-left px-4 py-3 font-semibold text-gray-600 w-24">Sentiment</th>
+              <th class="text-left px-4 py-3 font-semibold text-gray-600 w-20">Score</th>
+              <th class="text-left px-4 py-3 font-semibold text-gray-600">Features</th>
+              <th class="text-center px-4 py-3 font-semibold text-gray-600 w-12">Fix?</th>
+            </tr>
+          </thead>
+          <tbody id="mentionsBody" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+      <div id="emptyState" class="hidden p-12 text-center text-gray-400">
+        No mentions found. Run a scan to discover brand mentions.
+      </div>
+    </div>
+  </main>
+
+  <!-- Detail Modal -->
+  <div id="modal" class="hidden fixed inset-0 z-50 flex items-center justify-center modal-backdrop" onclick="if(event.target===this)closeModal()">
+    <div class="bg-white rounded-2xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto fade-in" id="modalContent"></div>
+  </div>
+
+  <script>
+    let debounceTimer;
+    function debounceLoad() {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(loadMentions, 300);
+    }
+
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/stats');
+        const data = await res.json();
+        document.getElementById('statTotal').textContent = data.total_mentions;
+        document.getElementById('statPositive').textContent = data.by_sentiment?.positive || 0;
+        document.getElementById('statNegative').textContent = data.by_sentiment?.negative || 0;
+        document.getElementById('statCorrections').textContent = data.corrections_needed;
+
+        const domainsEl = document.getElementById('topDomains');
+        domainsEl.innerHTML = (data.top_domains || []).map(d =>
+          `<button onclick="filterByDomain('${d.domain}')" class="px-3 py-1 bg-gray-100 hover:bg-brand-100 text-gray-700 hover:text-brand-700 rounded-full text-xs font-medium transition">${d.domain} <span class="text-gray-400">(${d.count})</span></button>`
+        ).join('');
+      } catch (e) { console.error('Failed to load stats', e); }
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        const data = await res.json();
+        document.getElementById('brandLabel').textContent = `Monitoring: ${data.brand_name}`;
+      } catch (e) {}
+    }
+
+    async function loadMentions() {
+      const sentiment = document.getElementById('filterSentiment').value;
+      const domain = document.getElementById('filterDomain').value;
+      const corrections = document.getElementById('filterCorrections').checked;
+      const params = new URLSearchParams();
+      if (sentiment) params.set('sentiment', sentiment);
+      if (domain) params.set('domain', domain);
+      if (corrections) params.set('corrections', 'true');
+      params.set('limit', '200');
+
+      try {
+        const res = await fetch(`/api/mentions?${params}`);
+        const mentions = await res.json();
+        renderMentions(mentions);
+        document.getElementById('resultCount').textContent = `${mentions.length} mention(s)`;
+        document.getElementById('lastUpdated').textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+      } catch (e) { console.error('Failed to load mentions', e); }
+    }
+
+    function renderMentions(mentions) {
+      const tbody = document.getElementById('mentionsBody');
+      const empty = document.getElementById('emptyState');
+      if (!mentions.length) {
+        tbody.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+
+      tbody.innerHTML = mentions.map(m => {
+        const scoreWidth = Math.abs(m.sentiment_score) * 100;
+        const scoreColor = m.sentiment_score > 0 ? '#16a34a' : m.sentiment_score < 0 ? '#dc2626' : '#ca8a04';
+        const features = (m.features_discussed || []).slice(0, 3).join(', ');
+        const corrIcon = m.correction_needed
+          ? '<span class="text-red-500 font-bold">!</span>'
+          : '<span class="text-green-400">—</span>';
+
+        return `<tr class="hover:bg-gray-50 cursor-pointer transition" onclick="showDetail('${encodeURIComponent(m.url)}')">
+          <td class="px-4 py-3">
+            <div class="font-medium text-gray-900 truncate max-w-[160px]">${m.domain}</div>
+            <div class="text-xs text-gray-400 truncate max-w-[160px]">${m.published_date || ''}</div>
+          </td>
+          <td class="px-4 py-3">
+            <div class="font-medium text-gray-800 line-clamp-2">${escHtml(m.title)}</div>
+          </td>
+          <td class="px-4 py-3"><span class="badge badge-${m.sentiment}">${m.sentiment}</span></td>
+          <td class="px-4 py-3">
+            <div class="text-xs font-mono mb-1 sentiment-${m.sentiment}">${m.sentiment_score >= 0 ? '+' : ''}${m.sentiment_score.toFixed(2)}</div>
+            <div class="w-full bg-gray-100 rounded-full"><div class="score-bar" style="width:${scoreWidth}%;background:${scoreColor}"></div></div>
+          </td>
+          <td class="px-4 py-3 text-xs text-gray-600 max-w-[200px] truncate">${escHtml(features)}</td>
+          <td class="px-4 py-3 text-center">${corrIcon}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    async function showDetail(encodedUrl) {
+      const url = decodeURIComponent(encodedUrl);
+      try {
+        const res = await fetch(`/api/mentions/detail?url=${encodeURIComponent(url)}`);
+        if (!res.ok) return;
+        const m = await res.json();
+
+        document.getElementById('modalContent').innerHTML = `
+          <div class="p-6">
+            <div class="flex items-start justify-between mb-4">
+              <div>
+                <h2 class="text-lg font-bold text-gray-900">${escHtml(m.title)}</h2>
+                <a href="${escHtml(m.url)}" target="_blank" class="text-sm text-brand-600 hover:underline break-all">${escHtml(m.url)}</a>
+              </div>
+              <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 p-1">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+              </button>
+            </div>
+
+            <div class="grid grid-cols-3 gap-3 mb-5">
+              <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xs text-gray-500 mb-1">Sentiment</p>
+                <span class="badge badge-${m.sentiment} text-sm">${m.sentiment}</span>
+              </div>
+              <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xs text-gray-500 mb-1">Score</p>
+                <p class="text-lg font-bold sentiment-${m.sentiment}">${m.sentiment_score >= 0 ? '+' : ''}${m.sentiment_score.toFixed(2)}</p>
+              </div>
+              <div class="bg-gray-50 rounded-lg p-3 text-center">
+                <p class="text-xs text-gray-500 mb-1">Tone</p>
+                <p class="text-sm font-medium">${escHtml(m.tone || '—')}</p>
+              </div>
+            </div>
+
+            <div class="space-y-4">
+              <div>
+                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Summary</h3>
+                <p class="text-sm text-gray-800">${escHtml(m.summary || 'No summary available.')}</p>
+              </div>
+              <div>
+                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Key Excerpt</h3>
+                <p class="text-sm text-gray-600 italic border-l-2 border-brand-500 pl-3">${escHtml(m.relevant_excerpt || '—')}</p>
+              </div>
+              <div>
+                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Features Discussed</h3>
+                <div class="flex flex-wrap gap-1.5">
+                  ${(m.features_discussed || []).map(f => `<span class="px-2 py-0.5 bg-brand-50 text-brand-700 rounded text-xs">${escHtml(f)}</span>`).join('') || '<span class="text-sm text-gray-400">None identified</span>'}
+                </div>
+              </div>
+              <div>
+                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">Outreach Recommendation</h3>
+                <p class="text-sm text-gray-800">${escHtml(m.reach_out_recommendation || '—')}</p>
+              </div>
+              ${m.correction_needed ? '<div class="bg-red-50 border border-red-200 rounded-lg p-3"><p class="text-sm font-semibold text-red-700">Correction Needed</p><p class="text-xs text-red-600">This article may contain factual errors about the brand.</p></div>' : ''}
+            </div>
+
+            <div class="mt-5 pt-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-400">
+              <span>${escHtml(m.domain)} &middot; ${m.published_date || 'Date unknown'}</span>
+              <span>Discovered: ${m.discovered_at ? m.discovered_at.slice(0,10) : '—'}</span>
+            </div>
+          </div>`;
+        document.getElementById('modal').classList.remove('hidden');
+      } catch (e) { console.error('Failed to load detail', e); }
+    }
+
+    function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+    function filterByDomain(domain) {
+      document.getElementById('filterDomain').value = domain;
+      loadMentions();
+    }
+
+    async function triggerScan() {
+      const btn = document.getElementById('scanBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> Scanning...';
+      try {
+        await fetch('/api/scan', { method: 'POST' });
+        setTimeout(() => { loadStats(); loadMentions(); btn.disabled = false; btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> Run Scan'; }, 5000);
+      } catch (e) { btn.disabled = false; }
+    }
+
+    function escHtml(s) {
+      if (!s) return '';
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+    loadConfig();
+    loadStats();
+    loadMentions();
+  </script>
+</body>
+</html>
