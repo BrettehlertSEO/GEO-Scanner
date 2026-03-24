@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "geo-scanner"
+version = "0.1.0"
+description = "Brand Mention Monitoring & Sentiment Analysis Tool for AI/LLM Visibility"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+dependencies = [
+    "httpx>=0.27,<1.0",
+    "beautifulsoup4>=4.12,<5.0",
+    "lxml>=5.0,<6.0",
+    "feedparser>=6.0,<7.0",
+    "openai>=1.30,<2.0",
+    "trafilatura>=1.12,<2.0",
+    "python-dotenv>=1.0,<2.0",
+    "rich>=13.7,<14.0",
+    "click>=8.1,<9.0",
+    "pydantic>=2.7,<3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+geo-scanner = "geo_scanner.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["geo_scanner*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
