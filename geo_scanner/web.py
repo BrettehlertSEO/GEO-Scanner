@@ -20,12 +20,16 @@ from geo_scanner.storage import MentionStore
 
 logger = logging.getLogger(__name__)
 
-settings = get_settings()
 STATIC_DIR = Path(__file__).parent / "static"
 
 
+def _settings():
+    """Always read fresh settings from environment."""
+    return get_settings()
+
+
 def get_store() -> MentionStore:
-    return MentionStore(settings.database_path)
+    return MentionStore(_settings().database_path)
 
 
 @asynccontextmanager
@@ -92,22 +96,26 @@ async def api_stats():
 
 @app.get("/api/config")
 async def api_config():
-    has_key = bool(settings.openai_api_key and len(settings.openai_api_key) > 10)
+    s = _settings()
+    live_key = os.environ.get("OPENAI_API_KEY", "")
+    has_key = bool(live_key and len(live_key) > 10)
     return {
-        "brand_name": settings.brand_name,
-        "brand_aliases": settings.brand_aliases,
-        "feeds_configured": len(settings.google_alerts_feed_urls),
-        "scan_interval_hours": settings.scan_interval_hours,
-        "openai_model": settings.openai_model,
+        "brand_name": s.brand_name,
+        "brand_aliases": s.brand_aliases,
+        "feeds_configured": len(s.google_alerts_feed_urls),
+        "scan_interval_hours": s.scan_interval_hours,
+        "openai_model": s.openai_model,
         "openai_key_configured": has_key,
+        "openai_key_prefix": live_key[:12] + "..." if has_key else "(not set)",
     }
 
 
 def _run_scan_task():
     """Background task to run a scan."""
-    store = get_store()
+    s = _settings()
+    store = MentionStore(s.database_path)
     try:
-        asyncio.run(run_scan(settings, store))
+        asyncio.run(run_scan(s, store))
     except Exception as exc:
         logger.error("Background scan failed: %s", exc)
     finally:
