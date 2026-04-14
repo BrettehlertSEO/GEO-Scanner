@@ -10,7 +10,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "Invalid mention ID" }, { status: 400 });
     }
 
-    const mention = getMentionById(mentionId);
+    const mention = await getMentionById(mentionId);
 
     if (!mention) {
       return NextResponse.json({ error: "Mention not found" }, { status: 404 });

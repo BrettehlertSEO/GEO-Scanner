@@ -9,9 +9,9 @@ import { formatSentimentScore } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default function OverviewPage() {
-  const stats = getStats();
-  const { mentions: recentMentions } = getMentions({ limit: 5 });
+export default async function OverviewPage() {
+  const stats = await getStats();
+  const { mentions: recentMentions } = await getMentions({ limit: 5 });
 
   return (
     <div className="p-8">

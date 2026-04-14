@@ -19,7 +19,7 @@ export default async function MentionDetailPage({ params }: MentionDetailPagePro
     notFound();
   }
 
-  const mention = getMentionById(mentionId);
+  const mention = await getMentionById(mentionId);
 
   if (!mention) {
     notFound();

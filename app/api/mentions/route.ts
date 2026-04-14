@@ -46,8 +46,8 @@ export async function GET(request: NextRequest) {
       options.sort_order = sortOrder as "asc" | "desc";
     }
 
-    const { mentions, total } = getMentions(options);
-    const domains = getDomains();
+    const { mentions, total } = await getMentions(options);
+    const domains = await getDomains();
 
     return NextResponse.json({
       mentions,
