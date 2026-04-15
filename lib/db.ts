@@ -1,71 +1,45 @@
-import initSqlJs, { Database } from "sql.js";
-import fs from "fs";
+import Database from "better-sqlite3";
 import path from "path";
 import type { Mention, MentionStats, Sentiment } from "./types";
 
 const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), "geo_scanner.db");
 
-let dbInstance: Database | null = null;
+let dbInstance: Database.Database | null = null;
 
-async function getDb(): Promise<Database> {
+function getDb(): Database.Database {
   if (dbInstance) return dbInstance;
-  
-  const SQL = await initSqlJs({
-    // Use the CDN-hosted WASM binary for compatibility
-    locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
-  });
-  
-  // Check if database file exists
-  if (fs.existsSync(dbPath)) {
-    const buffer = fs.readFileSync(dbPath);
-    dbInstance = new SQL.Database(buffer);
-  } else {
-    // Create empty database with schema for demo purposes
-    dbInstance = new SQL.Database();
-    dbInstance.run(`
-      CREATE TABLE IF NOT EXISTS mentions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        url TEXT NOT NULL,
-        domain TEXT NOT NULL,
-        title TEXT,
-        published_date TEXT,
-        discovered_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        raw_snippet TEXT,
-        relevant_excerpt TEXT,
-        sentiment TEXT DEFAULT 'neutral',
-        sentiment_score REAL DEFAULT 0.0,
-        features_discussed TEXT DEFAULT '[]',
-        summary TEXT,
-        tone TEXT,
-        reach_out_recommendation TEXT,
-        correction_needed INTEGER DEFAULT 0,
-        search_query TEXT,
-        crawl_success INTEGER DEFAULT 1
-      )
-    `);
+
+  try {
+    dbInstance = new Database(dbPath);
+  } catch {
+    // Create in-memory database if file doesn't exist
+    dbInstance = new Database(":memory:");
   }
   
+  // Ensure table exists
+  dbInstance.exec(`
+    CREATE TABLE IF NOT EXISTS mentions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      url TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      title TEXT,
+      published_date TEXT,
+      discovered_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      raw_snippet TEXT,
+      relevant_excerpt TEXT,
+      sentiment TEXT DEFAULT 'neutral',
+      sentiment_score REAL DEFAULT 0.0,
+      features_discussed TEXT DEFAULT '[]',
+      summary TEXT,
+      tone TEXT,
+      reach_out_recommendation TEXT,
+      correction_needed INTEGER DEFAULT 0,
+      search_query TEXT,
+      crawl_success INTEGER DEFAULT 1
+    )
+  `);
+  
   return dbInstance;
-}
-
-interface RawMention {
-  id: number;
-  url: string;
-  domain: string;
-  title: string;
-  published_date: string | null;
-  discovered_at: string;
-  raw_snippet: string;
-  relevant_excerpt: string;
-  sentiment: string;
-  sentiment_score: number;
-  features_discussed: string;
-  summary: string;
-  tone: string;
-  reach_out_recommendation: string;
-  correction_needed: number;
-  search_query: string;
-  crawl_success: number;
 }
 
 function transformMention(row: Record<string, unknown>): Mention {
@@ -90,22 +64,6 @@ function transformMention(row: Record<string, unknown>): Mention {
   };
 }
 
-function queryAll(db: Database, sql: string, params: (string | number)[] = []): Record<string, unknown>[] {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const results: Record<string, unknown>[] = [];
-  while (stmt.step()) {
-    results.push(stmt.getAsObject());
-  }
-  stmt.free();
-  return results;
-}
-
-function queryOne(db: Database, sql: string, params: (string | number)[] = []): Record<string, unknown> | null {
-  const results = queryAll(db, sql, params);
-  return results.length > 0 ? results[0] : null;
-}
-
 export interface GetMentionsOptions {
   sentiment?: Sentiment;
   domain?: string;
@@ -118,7 +76,7 @@ export interface GetMentionsOptions {
 }
 
 export async function getMentions(options: GetMentionsOptions = {}): Promise<{ mentions: Mention[]; total: number }> {
-  const db = await getDb();
+  const db = getDb();
   const { sentiment, domain, correction_needed, search, limit = 50, offset = 0, sort_by = "discovered_at", sort_order = "desc" } = options;
 
   const conditions: string[] = [];
@@ -143,48 +101,55 @@ export async function getMentions(options: GetMentionsOptions = {}): Promise<{ m
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
   
-  const countResult = queryOne(db, `SELECT COUNT(*) as total FROM mentions ${whereClause}`, params);
-  const total = (countResult?.total as number) || 0;
+  const countStmt = db.prepare(`SELECT COUNT(*) as total FROM mentions ${whereClause}`);
+  const countResult = countStmt.get(...params) as { total: number };
+  const total = countResult?.total || 0;
 
   const validSortColumns = ["discovered_at", "sentiment_score", "domain"];
   const sortColumn = validSortColumns.includes(sort_by) ? sort_by : "discovered_at";
   const sortDir = sort_order === "asc" ? "ASC" : "DESC";
 
   const sql = `SELECT * FROM mentions ${whereClause} ORDER BY ${sortColumn} ${sortDir} LIMIT ? OFFSET ?`;
-  const rows = queryAll(db, sql, [...params, limit, offset]);
+  const stmt = db.prepare(sql);
+  const rows = stmt.all(...params, limit, offset) as Record<string, unknown>[];
 
   return { mentions: rows.map(transformMention), total };
 }
 
 export async function getMentionById(id: number): Promise<Mention | null> {
-  const db = await getDb();
-  const row = queryOne(db, "SELECT * FROM mentions WHERE id = ?", [id]);
+  const db = getDb();
+  const stmt = db.prepare("SELECT * FROM mentions WHERE id = ?");
+  const row = stmt.get(id) as Record<string, unknown> | undefined;
   return row ? transformMention(row) : null;
 }
 
 export async function getStats(): Promise<MentionStats> {
-  const db = await getDb();
+  const db = getDb();
 
-  const totalResult = queryOne(db, "SELECT COUNT(*) as count FROM mentions");
-  const total = (totalResult?.count as number) || 0;
+  const totalStmt = db.prepare("SELECT COUNT(*) as count FROM mentions");
+  const totalResult = totalStmt.get() as { count: number };
+  const total = totalResult?.count || 0;
 
-  const bySentimentRows = queryAll(db, "SELECT sentiment, COUNT(*) as count FROM mentions GROUP BY sentiment");
+  const bySentimentStmt = db.prepare("SELECT sentiment, COUNT(*) as count FROM mentions GROUP BY sentiment");
+  const bySentimentRows = bySentimentStmt.all() as { sentiment: string; count: number }[];
   const by_sentiment: Record<Sentiment, number> = { positive: 0, negative: 0, neutral: 0, mixed: 0 };
   bySentimentRows.forEach((row) => {
-    by_sentiment[(row.sentiment as string) as Sentiment] = row.count as number;
+    by_sentiment[row.sentiment as Sentiment] = row.count;
   });
 
-  const correctionsResult = queryOne(db, "SELECT COUNT(*) as count FROM mentions WHERE correction_needed = 1");
-  const corrections = (correctionsResult?.count as number) || 0;
+  const correctionsStmt = db.prepare("SELECT COUNT(*) as count FROM mentions WHERE correction_needed = 1");
+  const correctionsResult = correctionsStmt.get() as { count: number };
+  const corrections = correctionsResult?.count || 0;
 
-  const avgResult = queryOne(db, "SELECT AVG(sentiment_score) as avg FROM mentions");
-  const avgScore = (avgResult?.avg as number) || 0;
+  const avgStmt = db.prepare("SELECT AVG(sentiment_score) as avg FROM mentions");
+  const avgResult = avgStmt.get() as { avg: number | null };
+  const avgScore = avgResult?.avg || 0;
 
-  const topDomainsRows = queryAll(db, "SELECT domain, COUNT(*) as count FROM mentions GROUP BY domain ORDER BY count DESC LIMIT 10");
+  const topDomainsStmt = db.prepare("SELECT domain, COUNT(*) as count FROM mentions GROUP BY domain ORDER BY count DESC LIMIT 10");
+  const topDomainsRows = topDomainsStmt.all() as { domain: string; count: number }[];
 
-  const sentimentOverTimeRows = queryAll(
-    db,
-    `SELECT 
+  const sentimentOverTimeStmt = db.prepare(`
+    SELECT 
       DATE(discovered_at) as date,
       SUM(CASE WHEN sentiment = 'positive' THEN 1 ELSE 0 END) as positive,
       SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) as negative,
@@ -192,14 +157,16 @@ export async function getStats(): Promise<MentionStats> {
       SUM(CASE WHEN sentiment = 'mixed' THEN 1 ELSE 0 END) as mixed
     FROM mentions 
     GROUP BY DATE(discovered_at) 
-    ORDER BY date ASC`
-  );
+    ORDER BY date ASC
+  `);
+  const sentimentOverTimeRows = sentimentOverTimeStmt.all() as { date: string; positive: number; negative: number; neutral: number; mixed: number }[];
 
-  const allFeaturesRows = queryAll(db, "SELECT features_discussed FROM mentions WHERE features_discussed IS NOT NULL AND features_discussed != '[]'");
+  const allFeaturesStmt = db.prepare("SELECT features_discussed FROM mentions WHERE features_discussed IS NOT NULL AND features_discussed != '[]'");
+  const allFeaturesRows = allFeaturesStmt.all() as { features_discussed: string }[];
   const featureCounts: Record<string, number> = {};
   allFeaturesRows.forEach((row) => {
     try {
-      const features = JSON.parse(row.features_discussed as string) as string[];
+      const features = JSON.parse(row.features_discussed) as string[];
       features.forEach((f) => {
         featureCounts[f] = (featureCounts[f] || 0) + 1;
       });
@@ -217,20 +184,15 @@ export async function getStats(): Promise<MentionStats> {
     by_sentiment,
     corrections_needed: corrections,
     avg_sentiment_score: avgScore,
-    top_domains: topDomainsRows.map(r => ({ domain: r.domain as string, count: r.count as number })),
-    sentiment_over_time: sentimentOverTimeRows.map(r => ({
-      date: r.date as string,
-      positive: r.positive as number,
-      negative: r.negative as number,
-      neutral: r.neutral as number,
-      mixed: r.mixed as number,
-    })),
+    top_domains: topDomainsRows,
+    sentiment_over_time: sentimentOverTimeRows,
     feature_coverage,
   };
 }
 
 export async function getDomains(): Promise<string[]> {
-  const db = await getDb();
-  const rows = queryAll(db, "SELECT DISTINCT domain FROM mentions ORDER BY domain");
-  return rows.map((r) => r.domain as string);
+  const db = getDb();
+  const stmt = db.prepare("SELECT DISTINCT domain FROM mentions ORDER BY domain");
+  const rows = stmt.all() as { domain: string }[];
+  return rows.map((r) => r.domain);
 }
