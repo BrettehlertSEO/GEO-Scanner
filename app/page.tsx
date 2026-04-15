@@ -85,7 +85,7 @@ export default function OverviewPage() {
       <div className="rounded-xl border border-border bg-card p-6">
         <h2 className="mb-4 text-lg font-semibold">Recent Mentions</h2>
         {recentMentions.length === 0 ? (
-          <p className="text-center text-muted-foreground py-8">No mentions found. Run the GEO Scanner CLI to discover mentions.</p>
+          <p className="text-center text-muted-foreground py-8">No mentions found. Configure your Google Alerts RSS feed to start tracking Rocket Money mentions.</p>
         ) : (
           <div className="space-y-3">
             {recentMentions.map((mention) => (
