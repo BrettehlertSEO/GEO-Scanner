@@ -1,68 +1,200 @@
-import Database from "better-sqlite3";
-import path from "path";
 import type { Mention, MentionStats, Sentiment } from "./types";
 
-const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), "geo_scanner.db");
+// Demo data for the GEO Scanner dashboard
+// In production, this would connect to a real database (Supabase, Neon, etc.)
 
-let dbInstance: Database.Database | null = null;
-
-function getDb(): Database.Database {
-  if (dbInstance) return dbInstance;
-
-  try {
-    dbInstance = new Database(dbPath);
-  } catch {
-    // Create in-memory database if file doesn't exist
-    dbInstance = new Database(":memory:");
-  }
-  
-  // Ensure table exists
-  dbInstance.exec(`
-    CREATE TABLE IF NOT EXISTS mentions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      url TEXT NOT NULL,
-      domain TEXT NOT NULL,
-      title TEXT,
-      published_date TEXT,
-      discovered_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      raw_snippet TEXT,
-      relevant_excerpt TEXT,
-      sentiment TEXT DEFAULT 'neutral',
-      sentiment_score REAL DEFAULT 0.0,
-      features_discussed TEXT DEFAULT '[]',
-      summary TEXT,
-      tone TEXT,
-      reach_out_recommendation TEXT,
-      correction_needed INTEGER DEFAULT 0,
-      search_query TEXT,
-      crawl_success INTEGER DEFAULT 1
-    )
-  `);
-  
-  return dbInstance;
-}
-
-function transformMention(row: Record<string, unknown>): Mention {
-  return {
-    id: row.id as number,
-    url: row.url as string,
-    domain: row.domain as string,
-    title: row.title as string,
-    published_date: row.published_date as string | null,
-    discovered_at: row.discovered_at as string,
-    raw_snippet: row.raw_snippet as string,
-    relevant_excerpt: row.relevant_excerpt as string,
-    sentiment: (row.sentiment as string) as Sentiment,
-    sentiment_score: row.sentiment_score as number,
-    features_discussed: row.features_discussed ? JSON.parse(row.features_discussed as string) : [],
-    summary: row.summary as string,
-    tone: row.tone as string,
-    reach_out_recommendation: row.reach_out_recommendation as string,
-    correction_needed: Boolean(row.correction_needed),
-    search_query: row.search_query as string,
-    crawl_success: Boolean(row.crawl_success),
-  };
-}
+const demoMentions: Mention[] = [
+  {
+    id: 1,
+    url: "https://techcrunch.com/2026/04/10/ai-tools-comparison",
+    domain: "techcrunch.com",
+    title: "The Best AI Tools for Business in 2026",
+    published_date: "2026-04-10",
+    discovered_at: "2026-04-10T14:30:00Z",
+    raw_snippet: "Among the top contenders, GEO Scanner stands out for its comprehensive brand monitoring capabilities...",
+    relevant_excerpt: "GEO Scanner offers real-time brand mention tracking across multiple platforms, making it an essential tool for PR teams.",
+    sentiment: "positive",
+    sentiment_score: 0.85,
+    features_discussed: ["brand monitoring", "real-time tracking", "PR tools"],
+    summary: "Featured as a top AI tool for business brand monitoring with emphasis on real-time capabilities.",
+    tone: "professional",
+    reach_out_recommendation: "Consider reaching out for a case study collaboration.",
+    correction_needed: false,
+    search_query: "GEO Scanner review",
+    crawl_success: true,
+  },
+  {
+    id: 2,
+    url: "https://www.g2.com/products/geo-scanner/reviews",
+    domain: "g2.com",
+    title: "GEO Scanner Reviews 2026",
+    published_date: "2026-04-08",
+    discovered_at: "2026-04-08T09:15:00Z",
+    raw_snippet: "Users praise the intuitive dashboard but note that pricing could be more competitive...",
+    relevant_excerpt: "Great tool for tracking brand mentions. The sentiment analysis is accurate, though the enterprise tier is pricey.",
+    sentiment: "mixed",
+    sentiment_score: 0.45,
+    features_discussed: ["dashboard", "sentiment analysis", "pricing"],
+    summary: "Mixed review highlighting strong features but concerns about enterprise pricing.",
+    tone: "balanced",
+    reach_out_recommendation: "Address pricing concerns in response. Consider offering a discount.",
+    correction_needed: false,
+    search_query: "GEO Scanner reviews",
+    crawl_success: true,
+  },
+  {
+    id: 3,
+    url: "https://reddit.com/r/marketing/comments/abc123",
+    domain: "reddit.com",
+    title: "Has anyone tried GEO Scanner for competitor analysis?",
+    published_date: "2026-04-05",
+    discovered_at: "2026-04-05T18:45:00Z",
+    raw_snippet: "I've been using it for 3 months and the competitor tracking feature is game-changing...",
+    relevant_excerpt: "The competitor analysis dashboard shows exactly where your brand is mentioned alongside competitors. Super useful for positioning.",
+    sentiment: "positive",
+    sentiment_score: 0.78,
+    features_discussed: ["competitor analysis", "brand positioning", "dashboard"],
+    summary: "Positive user testimonial focusing on competitor tracking capabilities.",
+    tone: "casual",
+    reach_out_recommendation: "Engage with this thread to provide additional tips.",
+    correction_needed: false,
+    search_query: "GEO Scanner competitor",
+    crawl_success: true,
+  },
+  {
+    id: 4,
+    url: "https://www.forbes.com/sites/tech/2026/04/01/brand-monitoring-tools",
+    domain: "forbes.com",
+    title: "Top 10 Brand Monitoring Tools for 2026",
+    published_date: "2026-04-01",
+    discovered_at: "2026-04-01T11:00:00Z",
+    raw_snippet: "GEO Scanner rounds out our top 10 list with its AI-powered sentiment analysis...",
+    relevant_excerpt: "While not the cheapest option, GEO Scanner offers robust AI-powered sentiment analysis that rivals more established competitors.",
+    sentiment: "neutral",
+    sentiment_score: 0.55,
+    features_discussed: ["AI sentiment analysis", "brand monitoring"],
+    summary: "Included in Forbes top 10 list with moderate praise.",
+    tone: "professional",
+    reach_out_recommendation: "Reach out to author for a deeper feature piece.",
+    correction_needed: false,
+    search_query: "brand monitoring tools 2026",
+    crawl_success: true,
+  },
+  {
+    id: 5,
+    url: "https://twitter.com/marketingpro/status/123456789",
+    domain: "twitter.com",
+    title: "@marketingpro tweet about GEO Scanner",
+    published_date: "2026-04-12",
+    discovered_at: "2026-04-12T16:20:00Z",
+    raw_snippet: "Just discovered GEO Scanner and it's already found 50+ mentions I was missing!",
+    relevant_excerpt: "Just discovered GEO Scanner and it's already found 50+ mentions I was missing! 🔥 Game changer for brand monitoring.",
+    sentiment: "positive",
+    sentiment_score: 0.92,
+    features_discussed: ["mention discovery", "brand monitoring"],
+    summary: "Enthusiastic endorsement on social media about discovery capabilities.",
+    tone: "enthusiastic",
+    reach_out_recommendation: "Retweet and thank the user.",
+    correction_needed: false,
+    search_query: "GEO Scanner twitter",
+    crawl_success: true,
+  },
+  {
+    id: 6,
+    url: "https://blog.competitor.com/why-we-switched-from-geo-scanner",
+    domain: "competitor.com",
+    title: "Why We Switched From GEO Scanner",
+    published_date: "2026-03-28",
+    discovered_at: "2026-03-28T10:30:00Z",
+    raw_snippet: "While GEO Scanner has solid features, we found the reporting limited for our enterprise needs...",
+    relevant_excerpt: "The reporting features in GEO Scanner couldn't handle our scale. We needed more customization options for our 50+ brand portfolio.",
+    sentiment: "negative",
+    sentiment_score: 0.25,
+    features_discussed: ["reporting", "enterprise scale", "customization"],
+    summary: "Competitor blog post highlighting limitations in enterprise reporting.",
+    tone: "critical",
+    reach_out_recommendation: "Document feedback for product team. Consider reaching out to understand specific needs.",
+    correction_needed: true,
+    search_query: "GEO Scanner enterprise",
+    crawl_success: true,
+  },
+  {
+    id: 7,
+    url: "https://www.producthunt.com/products/geo-scanner",
+    domain: "producthunt.com",
+    title: "GEO Scanner - AI-powered brand monitoring",
+    published_date: "2026-03-15",
+    discovered_at: "2026-03-15T08:00:00Z",
+    raw_snippet: "Launched on Product Hunt with 500+ upvotes! Great tool for startups...",
+    relevant_excerpt: "Finally an affordable brand monitoring tool for startups! The AI suggestions are spot on.",
+    sentiment: "positive",
+    sentiment_score: 0.88,
+    features_discussed: ["startup-friendly", "AI suggestions", "affordability"],
+    summary: "Successful Product Hunt launch with strong community response.",
+    tone: "enthusiastic",
+    reach_out_recommendation: "Follow up with top commenters for testimonials.",
+    correction_needed: false,
+    search_query: "GEO Scanner product hunt",
+    crawl_success: true,
+  },
+  {
+    id: 8,
+    url: "https://www.capterra.com/p/geo-scanner/reviews",
+    domain: "capterra.com",
+    title: "GEO Scanner Reviews on Capterra",
+    published_date: "2026-04-02",
+    discovered_at: "2026-04-02T13:45:00Z",
+    raw_snippet: "4.2/5 stars from 127 reviews. Users love the interface but want better integrations...",
+    relevant_excerpt: "Love the clean interface and accurate sentiment detection. Would be 5 stars if it had Slack integration.",
+    sentiment: "mixed",
+    sentiment_score: 0.62,
+    features_discussed: ["interface", "sentiment detection", "integrations"],
+    summary: "Strong Capterra rating with requests for more integrations.",
+    tone: "balanced",
+    reach_out_recommendation: "Announce Slack integration when available.",
+    correction_needed: false,
+    search_query: "GEO Scanner Capterra",
+    crawl_success: true,
+  },
+  {
+    id: 9,
+    url: "https://medium.com/@prexpert/brand-crisis-management",
+    domain: "medium.com",
+    title: "How I Used GEO Scanner to Navigate a Brand Crisis",
+    published_date: "2026-03-20",
+    discovered_at: "2026-03-20T15:30:00Z",
+    raw_snippet: "When negative press hit, GEO Scanner helped us identify and respond to mentions in real-time...",
+    relevant_excerpt: "The real-time alerts were crucial during our crisis. We could respond to negative coverage within minutes instead of hours.",
+    sentiment: "positive",
+    sentiment_score: 0.82,
+    features_discussed: ["real-time alerts", "crisis management", "response time"],
+    summary: "Case study on using the product for crisis management.",
+    tone: "professional",
+    reach_out_recommendation: "Request permission to feature as a case study.",
+    correction_needed: false,
+    search_query: "GEO Scanner crisis",
+    crawl_success: true,
+  },
+  {
+    id: 10,
+    url: "https://news.ycombinator.com/item?id=987654",
+    domain: "news.ycombinator.com",
+    title: "Ask HN: Best tools for brand monitoring?",
+    published_date: "2026-04-11",
+    discovered_at: "2026-04-11T20:00:00Z",
+    raw_snippet: "GEO Scanner was mentioned multiple times. Some concerns about data privacy...",
+    relevant_excerpt: "I use GEO Scanner but I'm curious about their data retention policy. Anyone know if they're GDPR compliant?",
+    sentiment: "neutral",
+    sentiment_score: 0.50,
+    features_discussed: ["data privacy", "GDPR", "data retention"],
+    summary: "HN discussion with privacy-related questions.",
+    tone: "inquisitive",
+    reach_out_recommendation: "Post official response about GDPR compliance and data policies.",
+    correction_needed: true,
+    search_query: "GEO Scanner HN",
+    crawl_success: true,
+  },
+];
 
 export interface GetMentionsOptions {
   sentiment?: Sentiment;
@@ -76,103 +208,88 @@ export interface GetMentionsOptions {
 }
 
 export async function getMentions(options: GetMentionsOptions = {}): Promise<{ mentions: Mention[]; total: number }> {
-  const db = getDb();
   const { sentiment, domain, correction_needed, search, limit = 50, offset = 0, sort_by = "discovered_at", sort_order = "desc" } = options;
 
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
+  let filtered = [...demoMentions];
 
   if (sentiment) {
-    conditions.push("sentiment = ?");
-    params.push(sentiment);
+    filtered = filtered.filter((m) => m.sentiment === sentiment);
   }
   if (domain) {
-    conditions.push("domain = ?");
-    params.push(domain);
+    filtered = filtered.filter((m) => m.domain === domain);
   }
   if (correction_needed !== undefined) {
-    conditions.push("correction_needed = ?");
-    params.push(correction_needed ? 1 : 0);
+    filtered = filtered.filter((m) => m.correction_needed === correction_needed);
   }
   if (search) {
-    conditions.push("(title LIKE ? OR domain LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`);
+    const searchLower = search.toLowerCase();
+    filtered = filtered.filter((m) => m.title.toLowerCase().includes(searchLower) || m.domain.toLowerCase().includes(searchLower));
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  
-  const countStmt = db.prepare(`SELECT COUNT(*) as total FROM mentions ${whereClause}`);
-  const countResult = countStmt.get(...params) as { total: number };
-  const total = countResult?.total || 0;
+  // Sort
+  filtered.sort((a, b) => {
+    let comparison = 0;
+    if (sort_by === "discovered_at") {
+      comparison = new Date(a.discovered_at).getTime() - new Date(b.discovered_at).getTime();
+    } else if (sort_by === "sentiment_score") {
+      comparison = a.sentiment_score - b.sentiment_score;
+    } else if (sort_by === "domain") {
+      comparison = a.domain.localeCompare(b.domain);
+    }
+    return sort_order === "asc" ? comparison : -comparison;
+  });
 
-  const validSortColumns = ["discovered_at", "sentiment_score", "domain"];
-  const sortColumn = validSortColumns.includes(sort_by) ? sort_by : "discovered_at";
-  const sortDir = sort_order === "asc" ? "ASC" : "DESC";
+  const total = filtered.length;
+  const paginated = filtered.slice(offset, offset + limit);
 
-  const sql = `SELECT * FROM mentions ${whereClause} ORDER BY ${sortColumn} ${sortDir} LIMIT ? OFFSET ?`;
-  const stmt = db.prepare(sql);
-  const rows = stmt.all(...params, limit, offset) as Record<string, unknown>[];
-
-  return { mentions: rows.map(transformMention), total };
+  return { mentions: paginated, total };
 }
 
 export async function getMentionById(id: number): Promise<Mention | null> {
-  const db = getDb();
-  const stmt = db.prepare("SELECT * FROM mentions WHERE id = ?");
-  const row = stmt.get(id) as Record<string, unknown> | undefined;
-  return row ? transformMention(row) : null;
+  return demoMentions.find((m) => m.id === id) || null;
 }
 
 export async function getStats(): Promise<MentionStats> {
-  const db = getDb();
+  const total = demoMentions.length;
 
-  const totalStmt = db.prepare("SELECT COUNT(*) as count FROM mentions");
-  const totalResult = totalStmt.get() as { count: number };
-  const total = totalResult?.count || 0;
-
-  const bySentimentStmt = db.prepare("SELECT sentiment, COUNT(*) as count FROM mentions GROUP BY sentiment");
-  const bySentimentRows = bySentimentStmt.all() as { sentiment: string; count: number }[];
   const by_sentiment: Record<Sentiment, number> = { positive: 0, negative: 0, neutral: 0, mixed: 0 };
-  bySentimentRows.forEach((row) => {
-    by_sentiment[row.sentiment as Sentiment] = row.count;
+  demoMentions.forEach((m) => {
+    by_sentiment[m.sentiment]++;
   });
 
-  const correctionsStmt = db.prepare("SELECT COUNT(*) as count FROM mentions WHERE correction_needed = 1");
-  const correctionsResult = correctionsStmt.get() as { count: number };
-  const corrections = correctionsResult?.count || 0;
+  const corrections = demoMentions.filter((m) => m.correction_needed).length;
 
-  const avgStmt = db.prepare("SELECT AVG(sentiment_score) as avg FROM mentions");
-  const avgResult = avgStmt.get() as { avg: number | null };
-  const avgScore = avgResult?.avg || 0;
+  const avgScore = demoMentions.reduce((sum, m) => sum + m.sentiment_score, 0) / total;
 
-  const topDomainsStmt = db.prepare("SELECT domain, COUNT(*) as count FROM mentions GROUP BY domain ORDER BY count DESC LIMIT 10");
-  const topDomainsRows = topDomainsStmt.all() as { domain: string; count: number }[];
+  // Top domains
+  const domainCounts: Record<string, number> = {};
+  demoMentions.forEach((m) => {
+    domainCounts[m.domain] = (domainCounts[m.domain] || 0) + 1;
+  });
+  const top_domains = Object.entries(domainCounts)
+    .map(([domain, count]) => ({ domain, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
 
-  const sentimentOverTimeStmt = db.prepare(`
-    SELECT 
-      DATE(discovered_at) as date,
-      SUM(CASE WHEN sentiment = 'positive' THEN 1 ELSE 0 END) as positive,
-      SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) as negative,
-      SUM(CASE WHEN sentiment = 'neutral' THEN 1 ELSE 0 END) as neutral,
-      SUM(CASE WHEN sentiment = 'mixed' THEN 1 ELSE 0 END) as mixed
-    FROM mentions 
-    GROUP BY DATE(discovered_at) 
-    ORDER BY date ASC
-  `);
-  const sentimentOverTimeRows = sentimentOverTimeStmt.all() as { date: string; positive: number; negative: number; neutral: number; mixed: number }[];
-
-  const allFeaturesStmt = db.prepare("SELECT features_discussed FROM mentions WHERE features_discussed IS NOT NULL AND features_discussed != '[]'");
-  const allFeaturesRows = allFeaturesStmt.all() as { features_discussed: string }[];
-  const featureCounts: Record<string, number> = {};
-  allFeaturesRows.forEach((row) => {
-    try {
-      const features = JSON.parse(row.features_discussed) as string[];
-      features.forEach((f) => {
-        featureCounts[f] = (featureCounts[f] || 0) + 1;
-      });
-    } catch {
-      // Skip invalid JSON
+  // Sentiment over time (group by date)
+  const dateMap: Record<string, { positive: number; negative: number; neutral: number; mixed: number }> = {};
+  demoMentions.forEach((m) => {
+    const date = m.discovered_at.split("T")[0];
+    if (!dateMap[date]) {
+      dateMap[date] = { positive: 0, negative: 0, neutral: 0, mixed: 0 };
     }
+    dateMap[date][m.sentiment]++;
+  });
+  const sentiment_over_time = Object.entries(dateMap)
+    .map(([date, sentiments]) => ({ date, ...sentiments }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Feature coverage
+  const featureCounts: Record<string, number> = {};
+  demoMentions.forEach((m) => {
+    m.features_discussed.forEach((f) => {
+      featureCounts[f] = (featureCounts[f] || 0) + 1;
+    });
   });
   const feature_coverage = Object.entries(featureCounts)
     .map(([feature, count]) => ({ feature, count }))
@@ -184,15 +301,13 @@ export async function getStats(): Promise<MentionStats> {
     by_sentiment,
     corrections_needed: corrections,
     avg_sentiment_score: avgScore,
-    top_domains: topDomainsRows,
-    sentiment_over_time: sentimentOverTimeRows,
+    top_domains,
+    sentiment_over_time,
     feature_coverage,
   };
 }
 
 export async function getDomains(): Promise<string[]> {
-  const db = getDb();
-  const stmt = db.prepare("SELECT DISTINCT domain FROM mentions ORDER BY domain");
-  const rows = stmt.all() as { domain: string }[];
-  return rows.map((r) => r.domain);
+  const domains = [...new Set(demoMentions.map((m) => m.domain))];
+  return domains.sort();
 }
