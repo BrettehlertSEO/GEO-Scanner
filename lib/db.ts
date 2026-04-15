@@ -10,7 +10,10 @@ let dbInstance: Database | null = null;
 async function getDb(): Promise<Database> {
   if (dbInstance) return dbInstance;
   
-  const SQL = await initSqlJs();
+  const SQL = await initSqlJs({
+    // Use the CDN-hosted WASM binary for compatibility
+    locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
+  });
   
   // Check if database file exists
   if (fs.existsSync(dbPath)) {
