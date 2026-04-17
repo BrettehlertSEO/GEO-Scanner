@@ -1,17 +1,47 @@
-import { MessageSquare, AlertTriangle, TrendingUp, Globe } from "lucide-react";
+"use client";
+
+import useSWR from "swr";
+import { MessageSquare, AlertTriangle, TrendingUp, Globe, Loader2 } from "lucide-react";
 import { KpiCard } from "@/components/kpi-card";
 import { MentionCard } from "@/components/mention-card";
 import { SentimentPie } from "@/components/charts/sentiment-pie";
 import { SentimentTrend } from "@/components/charts/sentiment-trend";
 import { DomainBar } from "@/components/charts/domain-bar";
-import { getStats, getMentions } from "@/lib/db";
 import { formatSentimentScore } from "@/lib/utils";
+import type { MentionStats, MentionsResponse } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
-export default async function OverviewPage() {
-  const stats = await getStats();
-  const { mentions: recentMentions } = await getMentions({ limit: 5 });
+export default function OverviewPage() {
+  const { data: stats, error: statsError, isLoading: statsLoading } = useSWR<MentionStats>("/api/stats", fetcher);
+  const { data: mentionsData, error: mentionsError, isLoading: mentionsLoading } = useSWR<MentionsResponse>(
+    "/api/mentions?limit=5",
+    fetcher
+  );
+
+  const isLoading = statsLoading || mentionsLoading;
+  const hasError = statsError || mentionsError;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (hasError || !stats) {
+    return (
+      <div className="p-8">
+        <div className="rounded-xl border border-destructive/50 bg-destructive/10 p-6 text-center">
+          <AlertTriangle className="mx-auto h-8 w-8 text-destructive mb-2" />
+          <p className="text-destructive">Failed to load dashboard data. Please try again later.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const recentMentions = mentionsData?.mentions || [];
 
   return (
     <div className="p-8">
@@ -55,7 +85,7 @@ export default async function OverviewPage() {
       <div className="rounded-xl border border-border bg-card p-6">
         <h2 className="mb-4 text-lg font-semibold">Recent Mentions</h2>
         {recentMentions.length === 0 ? (
-          <p className="text-center text-muted-foreground py-8">No mentions found. Run the GEO Scanner CLI to discover mentions.</p>
+          <p className="text-center text-muted-foreground py-8">No mentions found. Configure your Google Alerts RSS feed to start tracking Rocket Money mentions.</p>
         ) : (
           <div className="space-y-3">
             {recentMentions.map((mention) => (

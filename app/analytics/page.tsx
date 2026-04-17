@@ -6,8 +6,8 @@ import { FeaturesBar } from "@/components/charts/features-bar";
 
 export const dynamic = "force-dynamic";
 
-export default function AnalyticsPage() {
-  const stats = getStats();
+export default async function AnalyticsPage() {
+  const stats = await getStats();
 
   return (
     <div className="p-8">

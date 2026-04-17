@@ -1,106 +1,174 @@
-import initSqlJs, { Database } from "sql.js";
-import fs from "fs";
-import path from "path";
 import type { Mention, MentionStats, Sentiment } from "./types";
+import Parser from "rss-parser";
 
-const dbPath = process.env.DATABASE_PATH || path.join(process.cwd(), "geo_scanner.db");
+const GOOGLE_ALERTS_RSS_URL = "https://www.google.com/alerts/feeds/03849862949161863884/13814082573011252035";
 
-let dbInstance: Database | null = null;
+const parser = new Parser({
+  customFields: {
+    item: ["content"],
+  },
+});
 
-async function getDb(): Promise<Database> {
-  if (dbInstance) return dbInstance;
+// Cache to avoid hitting the RSS feed on every request
+let cachedMentions: Mention[] | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function extractDomain(url: string): string {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname.replace(/^www\./, "");
+  } catch {
+    return "unknown";
+  }
+}
+
+function stripHtml(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+function analyzeSentiment(text: string): { sentiment: Sentiment; score: number } {
+  const lowerText = text.toLowerCase();
   
-  const SQL = await initSqlJs();
+  const positiveWords = [
+    "best", "great", "excellent", "amazing", "love", "helpful", "recommend", "save", "saved", "savings",
+    "worth", "useful", "easy", "simple", "effective", "top", "favorite", "impressed", "awesome", "fantastic"
+  ];
+  const negativeWords = [
+    "worst", "bad", "terrible", "hate", "scam", "fraud", "waste", "expensive", "problem", "issue",
+    "difficult", "confusing", "disappointing", "avoid", "cancel", "complaint", "annoying", "frustrating"
+  ];
   
-  // Check if database file exists
-  if (fs.existsSync(dbPath)) {
-    const buffer = fs.readFileSync(dbPath);
-    dbInstance = new SQL.Database(buffer);
-  } else {
-    // Create empty database with schema for demo purposes
-    dbInstance = new SQL.Database();
-    dbInstance.run(`
-      CREATE TABLE IF NOT EXISTS mentions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        url TEXT NOT NULL,
-        domain TEXT NOT NULL,
-        title TEXT,
-        published_date TEXT,
-        discovered_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        raw_snippet TEXT,
-        relevant_excerpt TEXT,
-        sentiment TEXT DEFAULT 'neutral',
-        sentiment_score REAL DEFAULT 0.0,
-        features_discussed TEXT DEFAULT '[]',
-        summary TEXT,
-        tone TEXT,
-        reach_out_recommendation TEXT,
-        correction_needed INTEGER DEFAULT 0,
-        search_query TEXT,
-        crawl_success INTEGER DEFAULT 1
-      )
-    `);
+  let positiveCount = 0;
+  let negativeCount = 0;
+  
+  positiveWords.forEach(word => {
+    if (lowerText.includes(word)) positiveCount++;
+  });
+  negativeWords.forEach(word => {
+    if (lowerText.includes(word)) negativeCount++;
+  });
+  
+  const total = positiveCount + negativeCount;
+  if (total === 0) {
+    return { sentiment: "neutral", score: 0.5 };
   }
   
-  return dbInstance;
+  const score = (positiveCount - negativeCount + total) / (2 * total);
+  
+  if (positiveCount > negativeCount * 2) {
+    return { sentiment: "positive", score: Math.min(0.95, 0.7 + score * 0.25) };
+  } else if (negativeCount > positiveCount * 2) {
+    return { sentiment: "negative", score: Math.max(0.05, 0.3 - (1 - score) * 0.25) };
+  } else if (positiveCount > 0 && negativeCount > 0) {
+    return { sentiment: "mixed", score: 0.4 + score * 0.2 };
+  }
+  
+  return { sentiment: "neutral", score: 0.5 };
 }
 
-interface RawMention {
-  id: number;
-  url: string;
-  domain: string;
-  title: string;
-  published_date: string | null;
-  discovered_at: string;
-  raw_snippet: string;
-  relevant_excerpt: string;
-  sentiment: string;
-  sentiment_score: number;
-  features_discussed: string;
-  summary: string;
-  tone: string;
-  reach_out_recommendation: string;
-  correction_needed: number;
-  search_query: string;
-  crawl_success: number;
-}
-
-function transformMention(row: Record<string, unknown>): Mention {
-  return {
-    id: row.id as number,
-    url: row.url as string,
-    domain: row.domain as string,
-    title: row.title as string,
-    published_date: row.published_date as string | null,
-    discovered_at: row.discovered_at as string,
-    raw_snippet: row.raw_snippet as string,
-    relevant_excerpt: row.relevant_excerpt as string,
-    sentiment: (row.sentiment as string) as Sentiment,
-    sentiment_score: row.sentiment_score as number,
-    features_discussed: row.features_discussed ? JSON.parse(row.features_discussed as string) : [],
-    summary: row.summary as string,
-    tone: row.tone as string,
-    reach_out_recommendation: row.reach_out_recommendation as string,
-    correction_needed: Boolean(row.correction_needed),
-    search_query: row.search_query as string,
-    crawl_success: Boolean(row.crawl_success),
+function extractFeatures(text: string): string[] {
+  const lowerText = text.toLowerCase();
+  const features: string[] = [];
+  
+  const featureKeywords: Record<string, string> = {
+    "subscription": "subscription management",
+    "subscriptions": "subscription management",
+    "bill": "bill negotiation",
+    "negotiate": "bill negotiation",
+    "save": "savings tracking",
+    "saving": "savings tracking",
+    "budget": "budgeting",
+    "track": "expense tracking",
+    "cancel": "subscription cancellation",
+    "premium": "premium features",
+    "free": "free tier",
+    "bank": "bank integration",
+    "plaid": "Plaid integration",
+    "privacy": "data privacy",
+    "security": "security",
+    "app": "mobile app",
+    "notification": "notifications",
+    "alert": "alerts",
   };
+  
+  Object.entries(featureKeywords).forEach(([keyword, feature]) => {
+    if (lowerText.includes(keyword) && !features.includes(feature)) {
+      features.push(feature);
+    }
+  });
+  
+  return features.length > 0 ? features : ["general mention"];
 }
 
-function queryAll(db: Database, sql: string, params: (string | number)[] = []): Record<string, unknown>[] {
-  const stmt = db.prepare(sql);
-  stmt.bind(params);
-  const results: Record<string, unknown>[] = [];
-  while (stmt.step()) {
-    results.push(stmt.getAsObject());
+async function fetchMentionsFromRSS(): Promise<Mention[]> {
+  try {
+    console.log("[v0] Fetching Google Alerts RSS feed...");
+    const feed = await parser.parseURL(GOOGLE_ALERTS_RSS_URL);
+    console.log("[v0] Received", feed.items?.length || 0, "items from RSS feed");
+    
+    const mentions: Mention[] = (feed.items || []).map((item, index) => {
+      const title = item.title || "Untitled";
+      const url = item.link || "";
+      const content = stripHtml(item.content || item.contentSnippet || item.summary || "");
+      const pubDate = item.pubDate || item.isoDate || new Date().toISOString();
+      
+      const { sentiment, score } = analyzeSentiment(title + " " + content);
+      const features = extractFeatures(title + " " + content);
+      
+      return {
+        id: index + 1,
+        url,
+        domain: extractDomain(url),
+        title,
+        published_date: new Date(pubDate).toISOString().split("T")[0],
+        discovered_at: new Date(pubDate).toISOString(),
+        raw_snippet: content,
+        relevant_excerpt: content.slice(0, 500),
+        sentiment,
+        sentiment_score: score,
+        features_discussed: features,
+        summary: `Mention from ${extractDomain(url)}: ${title}`,
+        tone: sentiment === "positive" ? "favorable" : sentiment === "negative" ? "critical" : "neutral",
+        reach_out_recommendation: sentiment === "negative" 
+          ? "Consider reaching out to address concerns" 
+          : sentiment === "positive" 
+            ? "Potential testimonial or partnership opportunity" 
+            : "Monitor for updates",
+        correction_needed: sentiment === "negative",
+        search_query: "Rocket Money",
+        crawl_success: true,
+      };
+    });
+    
+    return mentions;
+  } catch (error) {
+    console.error("[v0] Error fetching RSS feed:", error);
+    return [];
   }
-  stmt.free();
-  return results;
 }
 
-function queryOne(db: Database, sql: string, params: (string | number)[] = []): Record<string, unknown> | null {
-  const results = queryAll(db, sql, params);
-  return results.length > 0 ? results[0] : null;
+async function getCachedMentions(): Promise<Mention[]> {
+  const now = Date.now();
+  
+  if (cachedMentions && (now - cacheTimestamp) < CACHE_TTL) {
+    console.log("[v0] Returning cached mentions");
+    return cachedMentions;
+  }
+  
+  console.log("[v0] Cache expired or empty, fetching fresh data");
+  cachedMentions = await fetchMentionsFromRSS();
+  cacheTimestamp = now;
+  
+  return cachedMentions;
 }
 
 export interface GetMentionsOptions {
@@ -115,94 +183,102 @@ export interface GetMentionsOptions {
 }
 
 export async function getMentions(options: GetMentionsOptions = {}): Promise<{ mentions: Mention[]; total: number }> {
-  const db = await getDb();
   const { sentiment, domain, correction_needed, search, limit = 50, offset = 0, sort_by = "discovered_at", sort_order = "desc" } = options;
 
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
+  let mentions = await getCachedMentions();
 
   if (sentiment) {
-    conditions.push("sentiment = ?");
-    params.push(sentiment);
+    mentions = mentions.filter((m) => m.sentiment === sentiment);
   }
   if (domain) {
-    conditions.push("domain = ?");
-    params.push(domain);
+    mentions = mentions.filter((m) => m.domain === domain);
   }
   if (correction_needed !== undefined) {
-    conditions.push("correction_needed = ?");
-    params.push(correction_needed ? 1 : 0);
+    mentions = mentions.filter((m) => m.correction_needed === correction_needed);
   }
   if (search) {
-    conditions.push("(title LIKE ? OR domain LIKE ?)");
-    params.push(`%${search}%`, `%${search}%`);
+    const searchLower = search.toLowerCase();
+    mentions = mentions.filter((m) => m.title.toLowerCase().includes(searchLower) || m.domain.toLowerCase().includes(searchLower));
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  
-  const countResult = queryOne(db, `SELECT COUNT(*) as total FROM mentions ${whereClause}`, params);
-  const total = (countResult?.total as number) || 0;
+  // Sort
+  mentions.sort((a, b) => {
+    let comparison = 0;
+    if (sort_by === "discovered_at") {
+      comparison = new Date(a.discovered_at).getTime() - new Date(b.discovered_at).getTime();
+    } else if (sort_by === "sentiment_score") {
+      comparison = a.sentiment_score - b.sentiment_score;
+    } else if (sort_by === "domain") {
+      comparison = a.domain.localeCompare(b.domain);
+    }
+    return sort_order === "asc" ? comparison : -comparison;
+  });
 
-  const validSortColumns = ["discovered_at", "sentiment_score", "domain"];
-  const sortColumn = validSortColumns.includes(sort_by) ? sort_by : "discovered_at";
-  const sortDir = sort_order === "asc" ? "ASC" : "DESC";
+  const total = mentions.length;
+  const paginated = mentions.slice(offset, offset + limit);
 
-  const sql = `SELECT * FROM mentions ${whereClause} ORDER BY ${sortColumn} ${sortDir} LIMIT ? OFFSET ?`;
-  const rows = queryAll(db, sql, [...params, limit, offset]);
-
-  return { mentions: rows.map(transformMention), total };
+  return { mentions: paginated, total };
 }
 
 export async function getMentionById(id: number): Promise<Mention | null> {
-  const db = await getDb();
-  const row = queryOne(db, "SELECT * FROM mentions WHERE id = ?", [id]);
-  return row ? transformMention(row) : null;
+  const mentions = await getCachedMentions();
+  return mentions.find((m) => m.id === id) || null;
 }
 
 export async function getStats(): Promise<MentionStats> {
-  const db = await getDb();
+  const mentions = await getCachedMentions();
+  const total = mentions.length;
 
-  const totalResult = queryOne(db, "SELECT COUNT(*) as count FROM mentions");
-  const total = (totalResult?.count as number) || 0;
+  if (total === 0) {
+    return {
+      total_mentions: 0,
+      by_sentiment: { positive: 0, negative: 0, neutral: 0, mixed: 0 },
+      corrections_needed: 0,
+      avg_sentiment_score: 0,
+      top_domains: [],
+      sentiment_over_time: [],
+      feature_coverage: [],
+    };
+  }
 
-  const bySentimentRows = queryAll(db, "SELECT sentiment, COUNT(*) as count FROM mentions GROUP BY sentiment");
   const by_sentiment: Record<Sentiment, number> = { positive: 0, negative: 0, neutral: 0, mixed: 0 };
-  bySentimentRows.forEach((row) => {
-    by_sentiment[(row.sentiment as string) as Sentiment] = row.count as number;
+  mentions.forEach((m) => {
+    by_sentiment[m.sentiment]++;
   });
 
-  const correctionsResult = queryOne(db, "SELECT COUNT(*) as count FROM mentions WHERE correction_needed = 1");
-  const corrections = (correctionsResult?.count as number) || 0;
+  const corrections = mentions.filter((m) => m.correction_needed).length;
 
-  const avgResult = queryOne(db, "SELECT AVG(sentiment_score) as avg FROM mentions");
-  const avgScore = (avgResult?.avg as number) || 0;
+  const avgScore = mentions.reduce((sum, m) => sum + m.sentiment_score, 0) / total;
 
-  const topDomainsRows = queryAll(db, "SELECT domain, COUNT(*) as count FROM mentions GROUP BY domain ORDER BY count DESC LIMIT 10");
+  // Top domains
+  const domainCounts: Record<string, number> = {};
+  mentions.forEach((m) => {
+    domainCounts[m.domain] = (domainCounts[m.domain] || 0) + 1;
+  });
+  const top_domains = Object.entries(domainCounts)
+    .map(([domain, count]) => ({ domain, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
 
-  const sentimentOverTimeRows = queryAll(
-    db,
-    `SELECT 
-      DATE(discovered_at) as date,
-      SUM(CASE WHEN sentiment = 'positive' THEN 1 ELSE 0 END) as positive,
-      SUM(CASE WHEN sentiment = 'negative' THEN 1 ELSE 0 END) as negative,
-      SUM(CASE WHEN sentiment = 'neutral' THEN 1 ELSE 0 END) as neutral,
-      SUM(CASE WHEN sentiment = 'mixed' THEN 1 ELSE 0 END) as mixed
-    FROM mentions 
-    GROUP BY DATE(discovered_at) 
-    ORDER BY date ASC`
-  );
-
-  const allFeaturesRows = queryAll(db, "SELECT features_discussed FROM mentions WHERE features_discussed IS NOT NULL AND features_discussed != '[]'");
-  const featureCounts: Record<string, number> = {};
-  allFeaturesRows.forEach((row) => {
-    try {
-      const features = JSON.parse(row.features_discussed as string) as string[];
-      features.forEach((f) => {
-        featureCounts[f] = (featureCounts[f] || 0) + 1;
-      });
-    } catch {
-      // Skip invalid JSON
+  // Sentiment over time (group by date)
+  const dateMap: Record<string, { positive: number; negative: number; neutral: number; mixed: number }> = {};
+  mentions.forEach((m) => {
+    const date = m.discovered_at.split("T")[0];
+    if (!dateMap[date]) {
+      dateMap[date] = { positive: 0, negative: 0, neutral: 0, mixed: 0 };
     }
+    dateMap[date][m.sentiment]++;
+  });
+  const sentiment_over_time = Object.entries(dateMap)
+    .map(([date, sentiments]) => ({ date, ...sentiments }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Feature coverage
+  const featureCounts: Record<string, number> = {};
+  mentions.forEach((m) => {
+    m.features_discussed.forEach((f) => {
+      featureCounts[f] = (featureCounts[f] || 0) + 1;
+    });
   });
   const feature_coverage = Object.entries(featureCounts)
     .map(([feature, count]) => ({ feature, count }))
@@ -214,20 +290,14 @@ export async function getStats(): Promise<MentionStats> {
     by_sentiment,
     corrections_needed: corrections,
     avg_sentiment_score: avgScore,
-    top_domains: topDomainsRows.map(r => ({ domain: r.domain as string, count: r.count as number })),
-    sentiment_over_time: sentimentOverTimeRows.map(r => ({
-      date: r.date as string,
-      positive: r.positive as number,
-      negative: r.negative as number,
-      neutral: r.neutral as number,
-      mixed: r.mixed as number,
-    })),
+    top_domains,
+    sentiment_over_time,
     feature_coverage,
   };
 }
 
 export async function getDomains(): Promise<string[]> {
-  const db = await getDb();
-  const rows = queryAll(db, "SELECT DISTINCT domain FROM mentions ORDER BY domain");
-  return rows.map((r) => r.domain as string);
+  const mentions = await getCachedMentions();
+  const domains = [...new Set(mentions.map((m) => m.domain))];
+  return domains.sort();
 }
